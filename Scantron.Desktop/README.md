@@ -14,12 +14,13 @@ will import.
 
 1. [Running it](#-running-it)
 2. [The sync workflow](#-the-sync-workflow)
-3. [What the three panes do](#-what-the-three-panes-do)
-4. [Where files live](#-where-files-live)
-5. [Keyboard shortcuts](#-keyboard-shortcuts)
-6. [Rules this app will not break](#-rules-this-app-will-not-break)
-7. [Project layout](#-project-layout)
-8. [Building and testing](#-building-and-testing)
+3. [Transferring over Wi-Fi](#-transferring-over-wi-fi)
+4. [What the three panes do](#-what-the-three-panes-do)
+5. [Where files live](#-where-files-live)
+6. [Keyboard shortcuts](#-keyboard-shortcuts)
+7. [Rules this app will not break](#-rules-this-app-will-not-break)
+8. [Project layout](#-project-layout)
+9. [Building and testing](#-building-and-testing)
 
 ---
 
@@ -84,6 +85,61 @@ In practice:
 
 ---
 
+## Transferring over Wi-Fi
+
+Files can move between the handheld and this PC over a shared network, with no USB cable and no
+cloud. It is a transfer, not a live sync: the same JSON documents a stick would carry, moved over
+HTTP instead.
+
+**The desktop hosts; the handheld connects.** The CK65 is a battery-powered warehouse device that
+cannot be relied on to hold a listening socket, while this PC is on and on the network. More to the
+point, the three-way merge, the baseline and the conflict review all live here - so a
+handheld-hosted hub would mean pushing merge state backwards over the wire.
+
+### Using it
+
+1. Click **Start sharing**. The status bar shows the address, e.g. `Transfer: Sharing at
+   http://192.168.1.50:8756`.
+2. On the CK65, open **Transfer**, type that address in, and press **Send to desktop** or **Get
+   from desktop**. **Find desktops** can locate the PC automatically if discovery is available.
+3. Anything the handheld sends lands in **Sync review**, exactly like a file import. Nothing is
+   applied until you accept it.
+
+Transfers are started from the handheld in both directions, because a pull is destructive on the
+device - it clears and replaces its whole database. So the desktop never initiates one, and
+**Pull from handheld** explains where to go rather than pretending to fetch. **Send to handheld**
+publishes the current document so the scanner can collect it.
+
+### The wire contract
+
+| Method | Path | Body |
+| --- | --- | --- |
+| `GET` | `/health` | plain text - is this the right machine, and is it sharing |
+| `POST` | `/push` | the unmodified Scantron export document |
+| `GET` | `/pull` | the unmodified Scantron export document |
+
+The body *is* the ordinary export file, with no envelope around it. Both ends already parse and
+validate exactly this document, so wrapping it would mean a second place for the two halves to
+disagree - and a file pushed over Wi-Fi has to be interchangeable with the same file moved over
+USB, which is surest when the bytes are the same bytes.
+
+### Security posture
+
+Plain HTTP with no authentication, on a closed network with no internet path. Adding TLS to a
+certificate-less self-signed setup on a CK65 costs more here than it buys.
+
+Within that, three things are enforced:
+
+- **Nothing listens until you ask.** The hub is inert at startup and closes the moment you switch
+  sharing off, so an endpoint that can read and overwrite the day's stock count does not outlive
+  the shift that needed it.
+- **Every document is validated before use.** Nothing is written and no merge happens on bytes
+  that have not been through the same reader and validator a file import would.
+- **Bodies are capped at 16 MB**, refused on arrival, so a malformed request cannot exhaust the
+  memory of the machine holding the inventory.
+
+---
+
 ## Where files live
 
 All paths are relative to the executable's directory.
@@ -92,6 +148,7 @@ All paths are relative to the executable's directory.
 | --- | --- |
 | `workspace.current.json` | The document you are editing. |
 | `workspace.base.json` | Last mutually-agreed snapshot - the third merge input. |
+| `inbox\push-*.json` | Every transfer the handheld sent, kept for the last 20 pushes. |
 | `scantron.log` | Tiered diagnostic log (timestamp, level, pid). |
 
 Both workspace files are written in the **device export format** and parsed by
@@ -112,6 +169,7 @@ rather than a truncated one.
 | `Ctrl+I` | Import from the handheld |
 | `Ctrl+D` | Add container |
 | `Ctrl+Enter` | Accept the pending merge |
+| `Ctrl+P` | Send to handheld - make this document available for the scanner to pull |
 
 ---
 
@@ -137,6 +195,15 @@ These are enforced in code and pinned by tests, because each one costs real stoc
 - **Duplicate uuids are never collapsed.** Two rows sharing one uuid are both preserved, matching
   the device's `assignMissingItemUuids` behaviour, which re-mints rather than merging. The UI
   maps items one-to-one and never re-groups by uuid.
+- **A transfer never becomes a second merge path.** An inbound push goes through the same
+  `MergeDocument` call a file import uses, so a rule changed for imports cannot leave transfers
+  behaving differently. A test pins the two to the same result.
+- **Nothing is listening until you start sharing.** The hub is inert at startup.
+- **An empty document is never sent to a device that would read it as "delete everything".** With
+  no document loaded, `/pull` answers `503` and says so. A deliberately empty document the
+  operator created is still served, because there the emptiness was asked for.
+- **A pull is never started from this side.** It is destructive on the handheld, which clears and
+  replaces its database, so both directions are initiated on the device.
 
 ---
 
@@ -146,13 +213,19 @@ These are enforced in code and pinned by tests, because each one costs real stoc
 Scantron.Desktop/
   Mvvm/          ObservableObject, RelayCommand, RelayCommand<T>
   Services/      ConflictResolver, InventoryFileService, WorkspaceStore, Log
+  Services/Transfer/
+                 HubEndpoints  the request surface, as a pure function
+                 TransferHub   the HttpListener socket around it
+                 InboxStore    stages inbound pushes to inbox\
   ViewModels/    MainViewModel, Container/Item/Conflict view models
   Views/         MainWindow, converters
 ```
 
 `Scantron.Desktop` depends on `Scantron.Core` and nothing else. There is no MVVM framework and
 no file-dialog abstraction package: the view model takes paths rather than dialogs, which is
-what lets the entire import-merge-resolve-accept path be tested without WPF.
+what lets the entire import-merge-resolve-accept path be tested without WPF. The same idea shapes
+the hub - all of the meaning lives in a pure `HubEndpoints.Handle`, and the socket layer only moves
+bytes to and from it.
 
 ---
 
@@ -160,11 +233,17 @@ what lets the entire import-merge-resolve-accept path be tested without WPF.
 
 ```bash
 dotnet build                       # whole solution
-dotnet test                        # 88 tests
+dotnet test                        # 141 tests
 dotnet run --project Scantron.Desktop
 ```
 
 `Scantron.Desktop.Tests` covers the parts where a mistake loses stock: conflict-to-row mapping
 (including the ambiguous legacy case that is refused rather than guessed), baseline persistence,
 the export validation gate, and the full merge workflow driven through the view model.
+
+The transfer hub is covered at two levels. `TransferHubTests` drives
+`HubEndpoints.Handle` - the whole request surface as a pure function - so every route, status
+code and failure message is reachable without binding a port. `TransferHubEndToEndTests` then
+runs the same contract over a real loopback socket with a real `HttpClient`, which is what proves
+the socket layer is wired to that core and that a push reaches the actual merge path.
 </path><file_text>

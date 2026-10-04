@@ -16,34 +16,58 @@
         <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveDialogCommand}" />
         <KeyBinding Key="I" Modifiers="Control" Command="{Binding ImportDialogCommand}" />
         <KeyBinding Key="D" Modifiers="Control" Command="{Binding AddContainerCommand}" />
-        <KeyBinding Key="Return" Modifiers="Control" Command="{Binding AcceptMergeCommand}" />
+                <!-- Ctrl+P is the push half of the transfer toolbar. Deliberately NOT Ctrl+S: exporting
+                     to a file and publishing to the handheld are different acts, and an operator who
+                     means one should never silently get the other. -->
+                <KeyBinding Key="P" Modifiers="Control" Command="{Binding PushToHandheldCommand}" />
+                <KeyBinding Key="Return" Modifiers="Control" Command="{Binding AcceptMergeCommand}" />
     </Window.InputBindings>
 
     <DockPanel>
 
         <!-- Toolbar -->
         <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,0,0,1"
-                Padding="12,8">
-            <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+                        BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,0,0,1"
+                        Padding="12,8">
+                    <DockPanel>
 
-                <StackPanel Orientation="Horizontal" Grid.Column="0">
-                    <Button Content="New" Command="{Binding NewCommand}" ToolTip="Start an empty document (Ctrl+N)" />
-                    <Button Content="Open..." Margin="6,0,0,0" Command="{Binding OpenDialogCommand}" ToolTip="Open an export file (Ctrl+O)" />
-                    <Button Content="Export..." Margin="6,0,0,0" Command="{Binding SaveDialogCommand}" ToolTip="Write a file for the handheld (Ctrl+S)" />
-                    <Rectangle Width="1" Margin="12,4" Fill="{StaticResource BorderBrushSoft}" />
-                    <Button Content="Import from handheld..." Margin="12,0,0,0"
-                            Command="{Binding ImportDialogCommand}" ToolTip="Merge a handheld export (Ctrl+I)" />
-                </StackPanel>
+                        <!-- Transfer.
+                             The sharing toggle and the address get a row of their own rather than a
+                             sixth button in the file row: the address is what the operator has to read
+                             off this PC and type into the CK65, and squeezing it beside SyncState is how
+                             it ends up truncated exactly when it matters. -->
+                        <TextBlock DockPanel.Dock="Bottom" Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Text="{Binding HubStatus, StringFormat='Transfer: {0}'}" />
 
-                <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
-                           Style="{StaticResource DimText}" Text="{Binding SyncState}" />
-            </Grid>
-        </Border>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Orientation="Horizontal" Grid.Column="0">
+                                <Button Content="New" Command="{Binding NewCommand}" ToolTip="Start an empty document (Ctrl+N)" />
+                                <Button Content="Open..." Margin="6,0,0,0" Command="{Binding OpenDialogCommand}" ToolTip="Open an export file (Ctrl+O)" />
+                                <Button Content="Export..." Margin="6,0,0,0" Command="{Binding SaveDialogCommand}" ToolTip="Write a file for the handheld (Ctrl+S)" />
+                                <Rectangle Width="1" Margin="12,4" Fill="{StaticResource BorderBrushSoft}" />
+                                <Button Content="Import from handheld..." Margin="12,0,0,0"
+                                        Command="{Binding ImportDialogCommand}" ToolTip="Merge a handheld export (Ctrl+I)" />
+                                <Rectangle Width="1" Margin="12,4" Fill="{StaticResource BorderBrushSoft}" />
+                                <Button Content="Start sharing" Command="{Binding StartSharingCommand}"
+                                        ToolTip="Open the transfer hub so the handheld can reach this PC" />
+                                <Button Content="Stop sharing" Margin="6,0,0,0" Command="{Binding StopSharingCommand}"
+                                        ToolTip="Close the transfer hub" />
+                                <Button Content="Send to handheld" Margin="12,0,0,0" Command="{Binding PushToHandheldCommand}"
+                                        ToolTip="Make this document available for the handheld to pull (Ctrl+P)" />
+                                <Button Content="Pull from handheld" Margin="6,0,0,0" Command="{Binding ReceiveFromHandheldCommand}"
+                                        ToolTip="Staged when the handheld pushes to this PC - see the activity log" />
+                            </StackPanel>
+
+                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                       Style="{StaticResource DimText}" Text="{Binding SyncState}" />
+                        </Grid>
+                    </DockPanel>
+                </Border>
 
         <!-- Status bar -->
         <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}"

@@ -4,6 +4,7 @@ using Scantron.Core.Models;
 using Scantron.Core.Merge;
 using Scantron.Desktop.Mvvm;
 using Scantron.Desktop.Services;
+using Scantron.Desktop.Services.Transfer;
 
 namespace Scantron.Desktop.ViewModels;
 
@@ -22,25 +23,42 @@ namespace Scantron.Desktop.ViewModels;
 /// failures through <see cref="StatusMessage"/>, so the whole class is drivable from a test by
 /// handing it paths directly.
 /// </para>
+/// <para>
+/// The one thing owned here that does talk to the outside world is the transfer hub, and it is
+/// injected rather than constructed so a test can supply one on a spare port. Shutdown closes it
+/// before anything else is torn down - see <see cref="Dispose"/>.
+/// </para>
 /// </remarks>
-public sealed class MainViewModel : ObservableObject
+public sealed class MainViewModel : ObservableObject, IDisposable
 {
     private readonly InventoryFileService _files = new();
     private readonly WorkspaceStore _workspace;
+        private readonly InboxStore _inbox;
+        private readonly TransferHub _hub;
+        private bool _disposed;
+        private bool _served;
 
-    private InventoryDocument? _document;
-    private InventoryDocument? _mergeCandidate;
-    private MergeResult? _pendingMerge;
-    private ContainerViewModel? _selectedContainer;
-    private ConflictViewModel? _selectedConflict;
-    private string _statusMessage = "Ready.";
-    private string _syncState = "Not synced";
-    private string? _lastExportPath;
-    private bool _isBusy;
+        private InventoryDocument? _document;
+        private InventoryDocument? _mergeCandidate;
+        private MergeResult? _pendingMerge;
+        private ContainerViewModel? _selectedContainer;
+        private ConflictViewModel? _selectedConflict;
+        private string _statusMessage = "Ready.";
+        private string _syncState = "Not synced";
+        private string? _lastExportPath;
+        private bool _isBusy;
+    private bool _hasWorkingDocument;
 
-    public MainViewModel(WorkspaceStore? workspace = null)
-    {
-        _workspace = workspace ?? new WorkspaceStore();
+        public MainViewModel(WorkspaceStore? workspace = null, InboxStore? inbox = null, TransferHub? hub = null)
+        {
+            _workspace = workspace ?? new WorkspaceStore();
+            _inbox = inbox ?? new InboxStore();
+            _hub = hub ?? new TransferHub();
+
+            // The hub reports from its serve loop. Reflected onto the view model rather than bound
+            // directly, because the toolbar has to be able to change the buttons the state implies -
+            // and only the view model knows what else is enabled.
+            _hub.StateChanged += (_, state) => OnHubStateChanged(state);
 
         NewCommand = new RelayCommand(NewDocument);
         OpenDialogCommand = new RelayCommand(OpenWithDialog);
@@ -58,6 +76,10 @@ public sealed class MainViewModel : ObservableObject
             () => SelectedConflict?.KeepLocal(), () => SelectedConflict is { IsResolved: false });
         TakeSelectedConflictRemoteCommand = new RelayCommand(
             () => SelectedConflict?.TakeRemote(), () => SelectedConflict is { IsResolved: false });
+                StartSharingCommand = new RelayCommand(StartSharing);
+                StopSharingCommand = new RelayCommand(StopSharingAsync, () => _hub.State.Listening);
+                PushToHandheldCommand = new RelayCommand(() => PushToHandheld(), () => CanPushToHandheld);
+                ReceiveFromHandheldCommand = new RelayCommand(() => ShowHandheldTransfer(), () => CanReceiveFromHandheld);
 
         LoadWorkspace();
     }
@@ -132,6 +154,63 @@ public sealed class MainViewModel : ObservableObject
         private set => SetProperty(ref _lastExportPath, value);
     }
 
+        // ---- LAN transfer ---------------------------------------------------------------------------------
+
+        /// <summary>
+        /// What the hub is doing, including the address to type into the handheld.
+        /// </summary>
+        /// <remarks>
+        /// This is the most important line on the toolbar. There is no discovery - the operator
+        /// reads the IP off the PC and enters it on the CK65 - so if this is wrong or vague, the
+        /// transfer simply cannot happen and there is nothing on screen to explain why.
+        /// </remarks>
+        public string HubStatus => _hub.State.Status;
+
+        /// <summary>
+        /// True when the hub is listening and reachable.
+        /// </summary>
+        /// <remarks>
+        /// Drives the toolbar buttons as well as the status text. Receiving is only offered while
+        /// something can actually be received, so the button cannot sit there implying a pull will
+        /// work when nothing is listening.
+        /// </remarks>
+        public bool IsSharing => _hub.State.Listening;
+
+    /// <summary>
+    /// The document a pull would serve, or null when there is nothing to serve.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null and empty are different answers here, and the difference is destructive. The
+    /// handheld imports by clearing and replacing, so handing it an empty
+    /// <c>containers</c> array instructs it to delete everything it holds. Returning null makes
+    /// <c>/pull</c> refuse outright instead.
+    /// </para>
+    /// <para>
+    /// That distinction cannot be read off <c>_document</c>, because a cold start with no
+    /// workspace still adopts an empty one - it has to, or the grid would have nothing to bind
+    /// to. So this is a separate flag rather than a null check: true once the operator has opened,
+    /// created or received something, and false only for the app that has just been launched
+    /// onto an empty desk.
+    /// </para>
+    /// </remarks>
+    public InventoryDocument? LiveDocument() => _hasWorkingDocument ? BuildDocument() : null;
+
+        /// <summary>
+        /// True when a pull from the desktop has already been answered this session.
+        /// </summary>
+        /// <remarks>
+        /// Pulling is destructive on the handheld - it clears and replaces its whole database - so
+        /// the app never pushes the document anywhere on its own. The file is put on the desk, the
+        /// operator carries it over, and the pull button exists to stage what arrived. Flagging that
+        /// it has happened is the only part of the exchange the desktop can observe.
+        /// </remarks>
+        public bool HasServedToHandheld
+        {
+            get => _served;
+            private set => SetProperty(ref _served, value);
+        }
+
     // ---- commands -----------------------------------------------------------------------------------
 
     public RelayCommand NewCommand { get; }
@@ -146,6 +225,10 @@ public sealed class MainViewModel : ObservableObject
     public RelayCommand TakeAllRemoteCommand { get; }
     public RelayCommand KeepSelectedConflictCommand { get; }
     public RelayCommand TakeSelectedConflictRemoteCommand { get; }
+        public RelayCommand StartSharingCommand { get; }
+        public RelayCommand StopSharingCommand { get; }
+        public RelayCommand PushToHandheldCommand { get; }
+        public RelayCommand ReceiveFromHandheldCommand { get; }
 
     /// <summary>
     /// Hook for the file pickers, injected so the view model stays free of WPF dialog types.
@@ -204,6 +287,29 @@ public sealed class MainViewModel : ObservableObject
     private bool CanAcceptMerge =>
         _pendingMerge is not null && !Conflicts.Any(c => !c.IsResolved) && !IsBusy;
 
+        /// <summary>
+        /// Sharing can always be started, even with nothing loaded.
+        /// </summary>
+        /// <remarks>
+        /// Deliberately unguarded. An operator who has just opened the app and wants to start
+        /// sharing should not have to invent a document first, and refusing to listen would leave no
+        /// way to diagnose why. <c>/pull</c> reports "nothing loaded" for that case; it does not
+        /// need a second opinion from the toolbar.
+        /// </remarks>
+        private bool CanShare => !IsBusy && !_hub.State.Listening;
+
+        private bool CanStopShare => !IsBusy && _hub.State.Listening;
+
+        /// <summary>Everything a <c>/pull</c> serves has to survive the export gate first.</summary>
+        /// <remarks>
+        /// Keyed off <c>LiveDocument</c> rather than <c>_document</c>, which is never null: a cold
+        /// start adopts an empty one so the grid has something to bind to. Offering to send that
+        /// would be offering the empty document whose delivery the whole 503 rule exists to prevent.
+        /// </remarks>
+        private bool CanPushToHandheld => _hasWorkingDocument && !IsBusy;
+
+        private bool CanReceiveFromHandheld => _hasWorkingDocument && !IsBusy && _hub.State.Listening;
+
     /// <summary>
     /// True while there is at least one open conflict to decide.
     /// </summary>
@@ -248,10 +354,15 @@ public sealed class MainViewModel : ObservableObject
     private void NewDocument()
     {
         AdoptEmpty();
-        StatusMessage = "Started a new document.";
-        AppendActivity("New document created.");
-        RaiseGuards();
-    }
+
+            // A deliberate "New" is an operator saying an empty document is what they want. It is
+            // still a real document, and refusing to serve it over the wire would be the confusing
+            // answer rather than the safe one.
+            _hasWorkingDocument = true;
+            StatusMessage = "Started a new document.";
+            AppendActivity("New document created.");
+            RaiseGuards();
+        }
 
     /// <summary>Replaces the working document with the contents of an export file.</summary>
     public void LoadFrom(Uri path)
@@ -269,7 +380,8 @@ public sealed class MainViewModel : ObservableObject
         // Keeping the previous base would make every row in the newly-opened file look changed.
         _workspace.SetDocuments(document, document);
         Adopt(document);
-        StatusMessage = $"Opened {Path.GetFileName(path.LocalPath)}.";
+                _hasWorkingDocument = true;
+                StatusMessage = $"Opened {Path.GetFileName(path.LocalPath)}.";
         AppendActivity($"Opened {Path.GetFileName(path.LocalPath)} and set it as the sync baseline.");
         RaiseGuards();
     }
@@ -346,33 +458,66 @@ public sealed class MainViewModel : ObservableObject
             return;
         }
 
-        var result = InventoryMerger.Merge(_workspace.Base, local, remote, DateTimeOffset.Now);
-
-        _pendingMerge = result;
-        _mergeCandidate = result.Document;
-        RebuildConflicts(result.Conflicts);
-
-        SyncState = Conflicts.Count == 0
-            ? "No conflicts"
-            : $"{Conflicts.Count(c => !c.IsResolved)} unresolved of {Conflicts.Count}";
-        SelectedConflict = null;
-
-        StatusMessage = result.Conflicts.Count == 0
-            ? $"Merged cleanly from {Path.GetFileName(path.LocalPath)}. Review, then accept."
-            : $"{Conflicts.Count} field(s) need a decision before this merge can be accepted.";
-
-        if (result.ClockSkewDetected)
-        {
-            // Loud, and unmissable: with a wrong clock on either device, "most recent wins"
-            // stops meaning anything, and the operator needs to know the ranking they are reading.
-            StatusMessage += " WARNING: a timestamp is far from this machine's clock, so recency is unreliable.";
-            AppendActivity("Clock skew detected between the desktop and the handheld export.");
+            MergeDocument(remote, Path.GetFileName(path.LocalPath));
         }
 
-        AppendActivity($"Merge preview from {Path.GetFileName(path.LocalPath)}: " +
-                       $"{result.Conflicts.Count} conflict(s), {result.ItemOutcomes.Count} row(s) examined.");
-        RaiseGuards();
-    }
+        /// <summary>
+        /// The one merge path. Both the file import and an inbound LAN push land here.
+        /// </summary>
+        /// <remarks>
+        /// <para>
+        /// There is exactly one of these. A second implementation - however identical it looked when
+        /// written - would be free to drift the first time a merge rule changed, and the drift would
+        /// show up as transfers behaving differently from USB imports, which is precisely the thing
+        /// the feature promises will not happen. So the rules live here once and both callers supply
+        /// only a document and the name to show the operator.
+        /// </para>
+        /// <para>
+        /// <paramref name="local"/> is passed in rather than rebuilt here because
+        /// <see cref="MergeFrom"/> has to build and persist it before it knows whether the file can
+        /// even be read. Building twice would stamp a second <c>exportedAt</c> on the same merge and
+        /// make the desktop look a moment newer than it is.
+        /// </para>
+        /// </remarks>
+        private void MergeDocument(InventoryDocument remote, string sourceLabel, InventoryDocument? local = null)
+        {
+            ArgumentNullException.ThrowIfNull(sourceLabel);
+
+            local ??= BuildDocument();
+            _document = local;
+
+            // Reaching here means something arrived from outside, so the operator is working on a
+            // real document from now on - including the case where the first thing that ever
+            // happened was a push from a scanner.
+            _hasWorkingDocument = true;
+
+            var result = InventoryMerger.Merge(_workspace.Base, local, remote, DateTimeOffset.Now);
+
+            _pendingMerge = result;
+            _mergeCandidate = result.Document;
+            RebuildConflicts(result.Conflicts);
+
+            SyncState = Conflicts.Count == 0
+                ? "No conflicts"
+                : $"{Conflicts.Count(c => !c.IsResolved)} unresolved of {Conflicts.Count}";
+            SelectedConflict = null;
+
+            StatusMessage = result.Conflicts.Count == 0
+                ? $"Merged cleanly from {sourceLabel}. Review, then accept."
+                : $"{result.Conflicts.Count} field(s) need a decision before this merge can be accepted.";
+
+            if (result.ClockSkewDetected)
+            {
+                // Loud, and unmissable: with a wrong clock on either device, "most recent wins"
+                // stops meaning anything, and the operator needs to know the ranking they are reading.
+                StatusMessage += " WARNING: a timestamp is far from this machine's clock, so recency is unreliable.";
+                AppendActivity("Clock skew detected between the desktop and the handheld export.");
+            }
+
+            AppendActivity($"Merge preview from {sourceLabel}: " +
+                           $"{result.Conflicts.Count} conflict(s), {result.ItemOutcomes.Count} row(s) examined.");
+            RaiseGuards();
+        }
 
     /// <summary>Applies every recorded decision and promotes the result to the working document.</summary>
     public void AcceptMerge()
@@ -500,7 +645,197 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    // ---- LAN transfer ----------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Opens the hub and leaves it open until the operator closes it.
+    /// </summary>
+    /// <remarks>
+    /// Synchronous on purpose. Binding is a local operation, and <see cref="TransferHub.Start"/>
+    /// never blocks on the network - the serve loop runs on its own task. Making this
+    /// <c>async</c> would only buy a dispatcher hop before a button click, and would leave the
+    /// view model deciding <c>await</c>s on a path that must be straightforward to reason about.
+    /// </remarks>
+    private void StartSharing()
+    {
+        _hub.Start(LiveDocument, ReceiveFromNetwork);
+
+        if (_hub.State.Error is { } error)
+        {
+            StatusMessage = $"Could not start sharing: {error}";
+            AppendActivity(StatusMessage);
+            return;
+        }
+
+        AppendActivity("Sharing with the handheld. Type the address above into the CK65's Transfer screen.");
+    }
+
+    /// <summary>
+    /// Closes the hub.
+    /// </summary>
+    /// <remarks>
+        /// Fire-and-forget by design. Stopping means refusing the next connection, and the listener
+        /// closes before anything is awaited, so the button has already done its job by the time this
+        /// returns. The one case that can take real time - a push mid-merge - is waited for by
+        /// <see cref="DisposeAsync"/>, which runs at shutdown while the view model is still whole.
+        /// </remarks>
+        private void StopSharingAsync() => _ = _hub.StopAsync();
+
+    /// <summary>
+    /// Offers the live document to a handheld that asks for it.
+    /// </summary>
+    /// <remarks>
+    /// Runs through the same gate as a file export, because it is the same promise: whatever
+    /// leaves this machine over the network is a document the handheld is entitled to import
+    /// without losing what it already holds. <c>/pull</c> refuses outright when there is nothing
+    /// loaded - see <c>HubEndpoints</c> - so this only ever sees a real document.
+    /// </remarks>
+    private HubResponse PushToHandheld()
+    {
+        var document = BuildDocument();
+        _document = document;
+
+        if (InventoryFileService.Validate(document) is { } invalid)
+        {
+            var message = $"Not sent - this document would be rejected by the handheld:{Environment.NewLine}{invalid}";
+            Log.Warning($"Refused a /pull: {invalid}");
+            StatusMessage = message;
+            AppendActivity(message);
+            return new HubResponse(400, HubResponse.Text, message);
+        }
+
+        HasServedToHandheld = true;
+        StatusMessage = $"Handheld pulled {Containers.Count} container(s). Confirm the import on the device.";
+        AppendActivity($"Handheld pulled {Containers.Count} container(s) over the network.");
+        return new HubResponse(200, HubResponse.Json, HubEndpoints.Acknowledgement(document));
+    }
+
+    /// <summary>
+        /// Explains that the pull half of a transfer is driven from the handheld.
+    /// </summary>
+        /// <remarks>
+        /// There is genuinely nothing for this to do, and that is worth saying out loud rather than
+        /// leaving a button that looks broken. Pulling is destructive on the device - it clears and
+        /// replaces its whole database - so the desktop never initiates it, and an operator watching
+        /// the screen after sending something to a scanner needs to be told where the merge will
+        /// appear.
+        /// </remarks>
+        private void ShowHandheldTransfer()
+        {
+            StatusMessage = "Nothing to do here - on the handheld choose Get from desktop. " +
+                            "Anything it sends appears in Sync review.";
+            AppendActivity("Pull direction explained: transfers are started from the handheld.");
+        }
+
+        /// <summary>
+        /// Stages an inbound push and sends it into the one merge path.
+        /// </summary>
+    /// <remarks>
+    /// Runs on the UI thread - <c>TransferHub</c> marshals here deliberately - because it
+    /// rebuilds the document from the grid and then replaces it with the merge result.
+    /// </remarks>
+    private void ReceiveFromHandheld(InventoryDocument remote)
+    {
+        if (_inbox.Stage(remote, out var path) is { } stageError)
+        {
+            // Not fatal - the merge still runs - but the operator has to know the desktop is
+            // currently the only copy of what the handheld sent.
+            StatusMessage = stageError;
+            AppendActivity(stageError);
+        }
+
+        MergeDocument(remote, $"the handheld over the network ({Path.GetFileName(path)})");
+    }
+
+    /// <summary>Routes a validated inbound document, from the hub's serve loop.</summary>
+    private HubResponse ReceiveFromNetwork(InventoryDocument remote)
+    {
+        ReceiveFromHandheld(remote);
+
+        var conflicts = Conflicts.Count(c => !c.IsResolved);
+
+            // The handheld has a ten second timeout and nothing to do but wait, so this answers the
+            // moment the merge is staged - not when the operator accepts it, which could be an hour
+            // later. The push is on disk and in the review pane by the time this is written.
+            return new HubResponse(
+                200,
+                HubResponse.Json,
+                conflicts == 0
+                    ? HubEndpoints.Acknowledgement(remote)
+                    : $$"""{"ok":true,"conflicts":{{conflicts}},"message":"{{PlainText(Conflicts.Count + " field(s) need a decision in Sync review on the desktop.")}}"}""");
+        }
+
+        /// <summary>
+        /// Flattens a sentence so it is safe to place inside a JSON string literal.
+        /// </summary>
+        /// <remarks>
+        /// Hand-escaped rather than serialized, because this is the one place a sentence built from
+        /// user data crosses into JSON. The handheld must never be handed a body that fails to parse
+        /// just because an operator named a container something with a quote in it.
+        /// </remarks>
+        private static string PlainText(string message) =>
+            message.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+
+    private void OnHubStateChanged(HubState state)
+    {
+        OnPropertyChanged(nameof(HubStatus));
+        OnPropertyChanged(nameof(IsSharing));
+        RaiseGuards();
+    }
+
     // ---- document plumbing --------------------------------------------------------------------------
+
+    /// <summary>
+    /// Closes the transfer hub.
+    /// </summary>
+    /// <remarks>
+    /// Called from the window's <c>Closed</c> event, because the view model's own disposal is
+    /// reached from the dispatcher, and the serve loop is already marshalling onto that same
+    /// dispatcher. Waiting here rather than from a synchronous Dispose is what makes shutdown
+    /// deterministic: an inbound push mid-merge completes against a live view model, or is
+    /// abandoned cleanly - it is never left holding one that is half torn down.
+    /// </remarks>
+    public void Dispose() => _ = DisposeAsync();
+
+    internal async Task DisposeAsync()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        try
+        {
+            await _hub.DisposeAsync().ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            // Nothing useful can be shown to an operator during shutdown, so this is the log's
+            // job rather than the status line's.
+            Log.Error("The transfer hub did not close cleanly", ex);
+        }
+    }
+
+        /// <summary>
+        /// Routes a validated inbound document from the hub's serve loop, on the UI thread.
+        /// </summary>
+        /// <remarks>
+        /// Internal so the end-to-end test can drive the exact path a real push takes, rather than a
+        /// stand-in that could diverge from it. That is the only reason this is not private, and it
+        /// is why the test asserts against <see cref="ActivityLog"/> rather than against this
+        /// method's name.
+        /// </remarks>
+        internal HubResponse MergeFromNetwork(InventoryDocument remote)
+        {
+            ArgumentNullException.ThrowIfNull(remote);
+            return ReceiveFromNetwork(remote);
+        }
+
+        /// <summary>Publishes the live document to a handheld that pulls it.</summary>
+        /// <remarks>Internal for the same reason as <see cref="MergeFromNetwork"/>.</remarks>
+        internal HubResponse SendToHandheld() => PushToHandheld();
 
     /// <summary>Rebuilds the editable view from an immutable document.</summary>
     private void Adopt(InventoryDocument document)
@@ -579,8 +914,12 @@ public sealed class MainViewModel : ObservableObject
         TakeAllRemoteCommand.RaiseCanExecuteChanged();
         KeepSelectedConflictCommand.RaiseCanExecuteChanged();
         TakeSelectedConflictRemoteCommand.RaiseCanExecuteChanged();
-        OnPropertyChanged(nameof(DocumentSummary));
-        OnPropertyChanged(nameof(SyncState));
+                StartSharingCommand.RaiseCanExecuteChanged();
+                StopSharingCommand.RaiseCanExecuteChanged();
+                PushToHandheldCommand.RaiseCanExecuteChanged();
+                ReceiveFromHandheldCommand.RaiseCanExecuteChanged();
+                OnPropertyChanged(nameof(DocumentSummary));
+                OnPropertyChanged(nameof(SyncState));
     }
 
     private void AppendActivity(string message)

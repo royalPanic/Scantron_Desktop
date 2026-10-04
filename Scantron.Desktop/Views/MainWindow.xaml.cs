@@ -22,6 +22,7 @@ public partial class MainWindow : Window
 
         ViewModel = new MainViewModel { Picker = new FilePicker(this) };
         DataContext = ViewModel;
+        Closed += (_, _) => ViewModel.Dispose();
     }
 
     private MainViewModel ViewModel { get; }
