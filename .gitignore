@@ -1,0 +1,48 @@
+# Build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+publish/
+
+# Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# Test and coverage output
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+*.coverage
+*.trx
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+
+# Local, machine-specific settings
+*.env
+.env.local
+appsettings.Development.local.json
+
+# Sync scratch files
+*.tmp
+*.bak
+
+# OS noise
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Inventories are user data, not source. The golden fixture used by the round-trip
+# test lives under Scantron.Core.Tests/Fixtures and IS tracked; this pattern only
+# excludes loose export files sitting in the working tree.
+scantron_inventory*.json
+*.sync-state.json
