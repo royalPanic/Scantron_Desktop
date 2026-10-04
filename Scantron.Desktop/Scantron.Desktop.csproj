@@ -19,7 +19,7 @@
 
   <ItemGroup>
     <!-- WPF projects do not get System.IO from implicit usings, unlike the plain .NET SDK.
-         Declared explicitly rather than with a using in every file that touches the disk. -->
+          Declared explicitly rather than with a using in every file that touches the disk. -->
     <Using Include="System.IO" />
   </ItemGroup>
 
