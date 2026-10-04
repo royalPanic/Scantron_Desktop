@@ -1,0 +1,69 @@
+{
+  "app": "Scantron",
+  "version": "1.1",
+  "exportedAt": "2026-10-04T10:30:00Z",
+  "containers": [
+    {
+      "id": "BOX-101",
+      "name": "Power Tools & Hardware",
+      "location": "Garage Shelf 2-A",
+      "notes": "Heavy plastic storage bin",
+      "updatedAt": 1705318200000,
+      "items": [
+        {
+          "name": "Cordless Drill 18V",
+          "uuid": "3f1c9e2a-8b47-4d16-9c05-7a2e6b1d4f83",
+          "barcode": "088381699921",
+          "quantity": 1,
+          "category": "Tools",
+          "notes": "Includes 2 lithium batteries",
+          "updatedAt": 1705318200000
+        },
+        {
+          "name": "Box of Drywall Screws (2 inch)",
+          "uuid": "9d2b7c41-6e3a-4f52-b8d1-0c7e5a9f3b62",
+          "barcode": "076808001021",
+          "quantity": 3,
+          "category": "Hardware",
+          "notes": "100 pcs per box",
+          "updatedAt": 1705318200000
+        },
+        {
+          "name": "Unlabelled spare",
+          "uuid": "",
+          "barcode": "",
+          "quantity": 2,
+          "category": "",
+          "notes": "",
+          "updatedAt": 1705318200000
+        }
+      ]
+    },
+    {
+      "id": "BIN-42",
+      "name": "Camping Gear",
+      "location": "Attic Rack 1",
+      "notes": "Waterproof green container",
+      "updatedAt": 1705318200000,
+      "items": [
+        {
+          "name": "2-Person Camping Tent",
+          "uuid": "4e8a1d67-2b93-4c58-8f0a-7d1e3b6c9a25",
+          "barcode": "076501065123",
+          "quantity": 1,
+          "category": "Outdoors",
+          "notes": "Green Coleman tent with rainfly",
+          "updatedAt": 1705318200000
+        }
+      ]
+    },
+    {
+      "id": "EMPTY-1",
+      "name": "Awaiting stock",
+      "location": "Loading dock",
+      "notes": "",
+      "updatedAt": 1705318200000,
+      "items": []
+    }
+  ]
+}

@@ -46,3 +46,8 @@ desktop.ini
 # excludes loose export files sitting in the working tree.
 scantron_inventory*.json
 *.sync-state.json
+
+# ...but never the test fixtures, which are inputs to the round-trip test and must
+# be versioned or the suite fails on any fresh clone.
+!Scantron.Core.Tests/Fixtures/
+!Scantron.Core.Tests/Fixtures/**

@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Scantron.Core.Tests/Scantron.Core.Tests.csproj" />
+  <Project Path="Scantron.Core/Scantron.Core.csproj" />
+</Solution>
