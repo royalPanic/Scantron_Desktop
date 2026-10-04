@@ -1,4 +1,6 @@
 <Solution>
   <Project Path="Scantron.Core.Tests/Scantron.Core.Tests.csproj" />
   <Project Path="Scantron.Core/Scantron.Core.csproj" />
+  <Project Path="Scantron.Desktop/Scantron.Desktop.csproj" />
+  <Project Path="Scantron.Desktop.Tests/Scantron.Desktop.Tests.csproj" />
 </Solution>

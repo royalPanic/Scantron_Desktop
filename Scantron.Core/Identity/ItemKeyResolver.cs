@@ -94,41 +94,83 @@ public static class ItemKeyResolver
     }
 
     /// <summary>
-    /// Indexes a container's items by key, keeping the most recently updated row when two rows
-    /// collide.
+        /// Indexes a container's items by key, so each row is addressable by the identity the other
+        /// device will use for it.
     /// </summary>
     /// <remarks>
-    /// Collisions can only occur in legacy documents, where the heuristic keys are genuinely
-    /// ambiguous. Resolving them by newest <c>updatedAt</c> mirrors the device, whose item
-    /// queries all order <c>updatedAt DESC</c> before taking <c>LIMIT 1</c>. Matching that tie
-    /// break keeps the desktop and the handheld converging on the same row instead of each
-    /// picking a different one and oscillating on every sync.
-    /// </remarks>
-    public static Dictionary<ItemKey, Item> IndexByKey(
-        string containerId,
-        IEnumerable<Item> items)
-    {
-        ArgumentNullException.ThrowIfNull(items);
-
-        var index = new Dictionary<ItemKey, Item>();
-        foreach (var item in items)
+        /// <para>
+        /// The two key kinds resolve collisions differently, because the device does:
+        /// </para>
+        /// <para>
+        /// A <see cref="ItemKeyKind.Uuid"/> collision means one identity is claimed by two rows. The
+        /// device's <c>assignMissingItemUuids</c> keeps the first row and <em>re-mints</em> the rest,
+        /// so both rows survive as separate items. Collapsing them here would drop stock the handheld
+        /// still holds, so duplicates are re-minted the same way - which also means the document this
+        /// library writes is already one the device imports without further changes.
+        /// </para>
+        /// <para>
+        /// The heuristic kinds can only collide in legacy documents, where the keys are genuinely
+        /// ambiguous. Those resolve to the newest <c>updatedAt</c>, mirroring the device, whose item
+        /// queries all order <c>updatedAt DESC</c> before taking <c>LIMIT 1</c>. Matching that tie
+        /// break keeps the desktop and the handheld converging on the same row instead of each
+        /// picking a different one and oscillating on every sync.
+        /// </para>
+        /// </remarks>
+        public static Dictionary<ItemKey, Item> IndexByKey(
+            string containerId,
+            IEnumerable<Item> items)
         {
-            var key = Resolve(containerId, item);
-            if (index.TryGetValue(key, out var existing))
+            ArgumentNullException.ThrowIfNull(items);
+
+            var index = new Dictionary<ItemKey, Item>();
+            foreach (var item in items)
             {
+                var key = Resolve(containerId, item);
+
+                if (!index.TryGetValue(key, out var existing))
+                {
+                    index[key] = item;
+                    continue;
+                }
+
+                if (key.Kind == ItemKeyKind.Uuid)
+                {
+                    var reminted = MintDistinctUuid(index, containerId, item);
+                    index[Resolve(containerId, reminted)] = reminted;
+                    continue;
+                }
+
                 if (item.UpdatedAt > existing.UpdatedAt)
                 {
                     index[key] = item;
                 }
             }
-            else
-            {
-                index[key] = item;
-            }
+
+            return index;
         }
 
-        return index;
-    }
+        /// <summary>
+        /// Returns <paramref name="item"/> carrying a fresh UUID that collides with nothing already
+        /// indexed. The re-guard is expected to run once - a fresh GUID colliding with an existing
+        /// row is a 2^-122 event - but it makes uniqueness a property of the result rather than a
+        /// statistical assumption.
+        /// </summary>
+        private static Item MintDistinctUuid(
+            Dictionary<ItemKey, Item> index,
+            string containerId,
+            Item item)
+        {
+            Item candidate;
+            ItemKey key;
+            do
+            {
+                candidate = item.WithNewUuid();
+                key = Resolve(containerId, candidate);
+            }
+            while (index.ContainsKey(key));
+
+            return candidate;
+        }
 
     private static string ComposeKey(string containerId, string discriminator) =>
         string.Concat(containerId.Trim(), KeySeparator.ToString(), discriminator.Trim());

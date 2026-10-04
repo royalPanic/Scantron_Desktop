@@ -1,0 +1,255 @@
+<Window x:Class="Scantron.Desktop.Views.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Scantron - Container Inventory"
+        Height="720" Width="1280"
+        MinHeight="560" MinWidth="1000"
+        Background="{StaticResource ChromeBrush}"
+        Foreground="{StaticResource TextBrush}"
+        TextOptions.TextFormattingMode="Display">
+
+    <Window.InputBindings>
+        <!-- Ctrl-based shortcuts throughout: this is a data-entry tool, so the keyboard path
+             has to work without reaching for the mouse. -->
+        <KeyBinding Key="N" Modifiers="Control" Command="{Binding NewCommand}" />
+        <KeyBinding Key="O" Modifiers="Control" Command="{Binding OpenDialogCommand}" />
+        <KeyBinding Key="S" Modifiers="Control" Command="{Binding SaveDialogCommand}" />
+        <KeyBinding Key="I" Modifiers="Control" Command="{Binding ImportDialogCommand}" />
+        <KeyBinding Key="D" Modifiers="Control" Command="{Binding AddContainerCommand}" />
+        <KeyBinding Key="Return" Modifiers="Control" Command="{Binding AcceptMergeCommand}" />
+    </Window.InputBindings>
+
+    <DockPanel>
+
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,0,0,1"
+                Padding="12,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Orientation="Horizontal" Grid.Column="0">
+                    <Button Content="New" Command="{Binding NewCommand}" ToolTip="Start an empty document (Ctrl+N)" />
+                    <Button Content="Open..." Margin="6,0,0,0" Command="{Binding OpenDialogCommand}" ToolTip="Open an export file (Ctrl+O)" />
+                    <Button Content="Export..." Margin="6,0,0,0" Command="{Binding SaveDialogCommand}" ToolTip="Write a file for the handheld (Ctrl+S)" />
+                    <Rectangle Width="1" Margin="12,4" Fill="{StaticResource BorderBrushSoft}" />
+                    <Button Content="Import from handheld..." Margin="12,0,0,0"
+                            Command="{Binding ImportDialogCommand}" ToolTip="Merge a handheld export (Ctrl+I)" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                           Style="{StaticResource DimText}" Text="{Binding SyncState}" />
+            </Grid>
+        </Border>
+
+        <!-- Status bar -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,1,0,0"
+                Padding="12,6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="1" Style="{StaticResource DimText}" Text="{Binding DocumentSummary}" />
+            </Grid>
+        </Border>
+
+        <!-- Three panes: containers | items | merge review -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="240" />
+                <ColumnDefinition Width="4" />
+                <ColumnDefinition Width="*" MinWidth="420" />
+                <ColumnDefinition Width="4" />
+                <ColumnDefinition Width="400" MinWidth="320" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Splitters: opaque so they do not disappear into the dark chrome. -->
+            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                          Background="{StaticResource BorderBrushSoft}" />
+            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch"
+                          Background="{StaticResource BorderBrushSoft}" />
+
+            <!-- Containers -->
+            <DockPanel Grid.Column="0" Margin="12">
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource HeadingText}" Text="Containers" />
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                    <Button Content="Add" Command="{Binding AddContainerCommand}" ToolTip="Add a container (Ctrl+D)" />
+                    <Button Content="Remove" Margin="6,0,0,0" Command="{Binding RemoveContainerCommand}"
+                            ToolTip="Remove the selected container" />
+                </StackPanel>
+                <ListBox x:Name="ContainerList"
+                         ItemsSource="{Binding Containers}"
+                         SelectedItem="{Binding SelectedContainer}"
+                         Background="{StaticResource ChromeBrush}"
+                         Foreground="{StaticResource TextBrush}"
+                         BorderBrush="{StaticResource BorderBrushSoft}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="4,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="{Binding Id}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Style="{StaticResource DimText}" TextTrimming="CharacterEllipsis">
+                                        <TextBlock.Text>
+                                            <MultiBinding StringFormat="{}{0} - {1}">
+                                                <Binding Path="Name" />
+                                                <Binding Path="Location" />
+                                            </MultiBinding>
+                                        </TextBlock.Text>
+                                    </TextBlock>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                    <Border Style="{StaticResource RoundBadge}" Background="{StaticResource PanelBrush}"
+                                            HorizontalAlignment="Right">
+                                        <TextBlock Style="{StaticResource DimText}"
+                                                   Text="{Binding TotalQuantity, StringFormat='x{0}'}" />
+                                    </Border>
+                                    <Border Style="{StaticResource RoundBadge}" Background="{StaticResource WarningBrush}"
+                                            Visibility="{Binding ItemsNeedingIdentity, Converter={StaticResource BoolToVisible}}">
+                                        <TextBlock Foreground="#FF201A0A" FontWeight="Bold"
+                                                   Text="{Binding ItemsNeedingIdentity}" />
+                                    </Border>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+
+            <!-- Items for the selected container -->
+            <DockPanel Grid.Column="2" Margin="0,12,12,12">
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource HeadingText}" Text="Items" />
+
+                <!-- Container metadata editor -->
+                <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}" CornerRadius="4"
+                        Padding="10" Margin="0,0,0,10"
+                        Visibility="{Binding SelectedContainer, Converter={StaticResource NullToVisible}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Tag" Style="{StaticResource DimText}" Margin="0,0,8,6" />
+                        <TextBox   Grid.Row="0" Grid.Column="1" Margin="0,0,12,6"
+                                 Text="{Binding SelectedContainer.Id, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="Label" Style="{StaticResource DimText}" Margin="0,0,8,6" />
+                        <TextBox   Grid.Row="0" Grid.Column="3" Margin="0,0,0,6"
+                                 Text="{Binding SelectedContainer.Name, UpdateSourceTrigger=PropertyChanged}" />
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Location" Style="{StaticResource DimText}" Margin="0,0,8,0" />
+                        <TextBox   Grid.Row="1" Grid.Column="1" Margin="0,0,12,0"
+                                 Text="{Binding SelectedContainer.Location, UpdateSourceTrigger=PropertyChanged}" />
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="Notes" Style="{StaticResource DimText}" Margin="0,0,8,0" />
+                        <TextBox   Grid.Row="1" Grid.Column="3"
+                                 Text="{Binding SelectedContainer.Notes, UpdateSourceTrigger=PropertyChanged}" />
+                    </Grid>
+                </Border>
+
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
+                    <Button Content="Add item" Command="{Binding SelectedContainer.AddItemCommand}" />
+                    <Button Content="Remove item" Margin="6,0,0,0"
+                            Command="{Binding SelectedContainer.RemoveItemCommand}"
+                            CommandParameter="{Binding SelectedItem, ElementName=ItemGrid}" />
+                    <Border Style="{StaticResource RoundBadge}" Background="{StaticResource PanelBrush}">
+                        <TextBlock Style="{StaticResource DimText}"
+                                   Text="{Binding SelectedContainer.TotalQuantity, StringFormat='{}{0} units total'}" />
+                    </Border>
+                </StackPanel>
+
+                <DataGrid x:Name="ItemGrid"
+                          ItemsSource="{Binding SelectedContainerItems}"
+                          CellEditEnding="OnItemCellEditEnding"
+                          Margin="0,0,0,0">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                            Width="2*" MinWidth="140" />
+                        <DataGridTextColumn Header="Barcode" Binding="{Binding Barcode, UpdateSourceTrigger=PropertyChanged}"
+                                            Width="*" MinWidth="100" />
+                        <DataGridTextColumn Header="Qty" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus}"
+                                            Width="70" />
+                        <DataGridTextColumn Header="Category" Binding="{Binding Category, UpdateSourceTrigger=PropertyChanged}"
+                                            Width="*" MinWidth="90" />
+                        <DataGridTextColumn Header="Notes" Binding="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
+                                            Width="2*" MinWidth="120" />
+                    </DataGrid.Columns>
+                </DataGrid>
+            </DockPanel>
+
+            <!-- Merge review -->
+            <DockPanel Grid.Column="4" Margin="0,12,12,12">
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource HeadingText}" Text="Sync review" />
+
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                    <Button Content="Accept" Command="{Binding AcceptMergeCommand}" Style="{StaticResource PrimaryButton}"
+                            ToolTip="Apply every decision and export as the new baseline (Ctrl+Enter)" />
+                    <Button Content="Discard" Margin="6,0,0,0" Command="{Binding DiscardMergeCommand}" />
+                </StackPanel>
+
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button Content="All: desktop" Command="{Binding TakeAllLocalCommand}" MinWidth="96" />
+                    <Button Content="All: handheld" Margin="6,0,0,0" Command="{Binding TakeAllRemoteCommand}" MinWidth="100" />
+                </StackPanel>
+
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource DimText}" Margin="0,0,0,8"
+                           Text="Every field both sides changed is listed here. Nothing is applied until you accept." />
+
+                <DataGrid x:Name="ConflictGrid"
+                          ItemsSource="{Binding Conflicts}"
+                          SelectedItem="{Binding SelectedConflict}"
+                          MaxHeight="280" Margin="0,0,0,10">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Container" Binding="{Binding ContainerId}" Width="*" MinWidth="80" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Item" Binding="{Binding ItemName}" Width="*" MinWidth="90" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Field" Binding="{Binding Field}" Width="*" MinWidth="70" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Desktop" Binding="{Binding LocalValue}" Width="*" MinWidth="60" IsReadOnly="True" />
+                        <DataGridTextColumn Header="Handheld" Binding="{Binding RemoteValue}" Width="*" MinWidth="60" IsReadOnly="True" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <!-- Per-conflict decision buttons, driven by the selection above. -->
+                <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}" CornerRadius="4"
+                        Padding="10" Margin="0,0,0,10"
+                        Visibility="{Binding SelectedConflict, Converter={StaticResource NullToVisible}}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource HeadingText}" Text="Selected conflict" Margin="0,0,0,6" />
+                        <TextBlock Style="{StaticResource DimText}" TextWrapping="Wrap" Margin="0,0,0,8"
+                                   Text="{Binding SelectedConflict.Summary}" />
+                        <StackPanel Orientation="Horizontal">
+                            <Button Content="Keep desktop" Command="{Binding KeepSelectedConflictCommand}" />
+                            <Button Content="Take handheld" Margin="6,0,0,0" Command="{Binding TakeSelectedConflictRemoteCommand}" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource HeadingText}" Text="Activity" />
+                <ListBox ItemsSource="{Binding ActivityLog}"
+                         Background="{StaticResource ChromeBrush}"
+                         Foreground="{StaticResource TextDimBrush}"
+                         BorderBrush="{StaticResource BorderBrushSoft}"
+                         FontFamily="Consolas" FontSize="11">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="2,1" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

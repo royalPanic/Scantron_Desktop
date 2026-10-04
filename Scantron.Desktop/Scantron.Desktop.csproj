@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Scantron.Desktop</RootNamespace>
+    <AssemblyName>Scantron.Desktop</AssemblyName>
+    <!-- Single self-contained executable: this is the artefact copied onto warehouse
+         workstations, so it must not require a .NET install to be present. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- NOT invariant-globalization: WPF resolves the thread culture through ICU when it builds
+         its default text and number formatters, and throws "Cannot find non-neutral culture
+         related to 'en-us'" without it. The cost is a larger executable; the alternative is an
+         app that throws on every layout pass. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WPF projects do not get System.IO from implicit usings, unlike the plain .NET SDK.
+         Declared explicitly rather than with a using in every file that touches the disk. -->
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Scantron.Core\Scantron.Core.csproj" />
+  </ItemGroup>
+
+</Project>

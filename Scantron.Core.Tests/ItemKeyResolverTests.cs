@@ -112,6 +112,41 @@ public sealed class ItemKeyResolverTests
         Assert.Equal(2_000, index.Values.Single().UpdatedAt);
     }
 
+        [Fact]
+        public void IndexByKey_keeps_both_rows_when_one_uuid_is_claimed_twice()
+        {
+            // The device re-mints the second row rather than discarding it (assignMissingItemUuids),
+            // so collapsing a shared UUID here would silently drop stock the handheld still holds.
+            var first = new Item { Name = "Drill", Uuid = "same-uuid", UpdatedAt = 1_000 };
+            var second = new Item { Name = "Screws", Uuid = "same-uuid", UpdatedAt = 2_000 };
+
+            var index = ItemKeyResolver.IndexByKey("BOX-101", [first, second]);
+
+            Assert.Equal(2, index.Count);
+            Assert.Equal("Drill", index[new ItemKey(ItemKeyKind.Uuid, "same-uuid")].Name);
+
+            // The re-minted row must carry a new identity, and no two rows may claim the same one.
+            var reminted = Assert.Single(index.Values, i => i.Name == "Screws");
+            Assert.NotEqual("same-uuid", reminted.Uuid);
+
+            var identities = index.Values.Select(i => i.Uuid).ToList();
+            Assert.Equal(identities.Count, identities.Distinct(StringComparer.Ordinal).Count());
+        }
+
+        [Fact]
+        public void IndexByKey_gives_a_uuid_and_a_heuristic_key_the_same_row()
+        {
+            // A legacy export can carry one row with an identity and another without. Once both have
+            // been indexed they must not be merged together just because their other fields agree.
+            var withUuid = new Item { Name = "Drill", Uuid = "abc", Barcode = "AAA" };
+            var legacy = new Item { Name = "Drill", Barcode = "AAA" };
+
+            var index = ItemKeyResolver.IndexByKey("BOX-101", [withUuid, legacy]);
+
+            Assert.Equal(2, index.Count);
+            Assert.Equal(ItemKeyKind.Uuid, ItemKeyResolver.Resolve("BOX-101", index.Values.First(i => i.Uuid == "abc")).Kind);
+        }
+
     [Fact]
     public void IsNameOnly_treats_whitespace_as_no_barcode()
     {
