@@ -42,7 +42,6 @@ public sealed class TransferHubEndToEndTests : IAsyncLifetime
         _vm = new MainViewModel(new WorkspaceStore(_directory), new InboxStore(_directory), _hub);
         return Task.CompletedTask;
     }
-
     public async Task DisposeAsync()
     {
         await _hub.DisposeAsync();
@@ -85,6 +84,25 @@ public sealed class TransferHubEndToEndTests : IAsyncLifetime
 
     private static void SkipUnlessListening(TransferHub hub) =>
         Assert.True(hub.State.Listening, $"The transfer hub could not bind: {hub.State.Error}");
+
+    /// <summary>
+    /// The machine's own non-loopback IPv4 address, or null when it has none.
+    /// </summary>
+    /// <remarks>
+    /// The address a handheld would actually dial. Null only on a machine with no LAN adapter,
+    /// where the LAN reachability assertions below cannot mean anything and are skipped rather
+    /// than made to pass.
+    /// </remarks>
+    private static IPAddress? LanAddress() =>
+        TransferHub.LocalAddresses()
+            .FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a));
+
+    private static IPAddress RequireLanAddress()
+    {
+        var lan = LanAddress();
+        Assert.True(lan is not null, "This machine has no non-loopback IPv4 address to test LAN reachability against.");
+        return lan!;
+    }
 
     [Fact]
     public async Task A_push_over_a_socket_reaches_the_merge_path_and_the_inbox()
@@ -226,6 +244,78 @@ public sealed class TransferHubEndToEndTests : IAsyncLifetime
         _hub.Start(_vm.LiveDocument, _vm.MergeFromNetwork);
 
         Assert.True(_hub.State.Listening);
+    }
+
+    /// <summary>
+    /// The hub has to answer on a LAN address, not only on loopback.
+    /// </summary>
+    /// <remarks>
+    /// This is the test that would have caught the bug this listener was rewritten for. The
+    /// previous implementation bound through <see cref="HttpListener"/>, whose non-loopback
+    /// prefixes need a URL ACL reservation that only an elevated process can make. Without one
+    /// the wildcard and every literal address were refused with "Access is denied", the hub fell
+    /// back to <c>127.0.0.1</c>, and it went on reporting "Sharing at http://192.168.x.x:8756"
+    /// while the CK65 got "Connection refused". Every test above passes on loopback, and so did
+    /// that implementation - the hub was only ever tested through the address it could not bind.
+    /// <para>
+    /// So this asserts on the socket itself: bind, then connect to the port using one of the
+    /// machine's real non-loopback addresses, which is what the handheld does.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public async Task The_hub_answers_on_a_lan_address_and_not_only_on_loopback()
+    {
+        var lan = RequireLanAddress();
+
+        Load();
+        _hub.Start(_vm.LiveDocument, _vm.MergeFromNetwork);
+        SkipUnlessListening(_hub);
+
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        var response = await client.GetAsync($"http://{lan}:{Port}/health");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.StartsWith("scantron-hub/1 ", await response.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Every address on the status line has to be an address the hub is really listening on.
+    /// </summary>
+    /// <remarks>
+    /// The status line is the only thing the operator can act on - it is where they read the IP
+    /// to type into the CK65. Reporting an address that is not bound produces a toolbar that
+    /// looks like sharing succeeded and a handheld that cannot connect, which is exactly the
+    /// failure this pair of tests exists to keep fixed.
+    /// </remarks>
+    [Fact]
+    public void The_status_line_only_names_addresses_the_hub_is_listening_on()
+    {
+        var advertised = TransferHub.AdvertisedAddresses([IPAddress.Any]);
+
+        Assert.DoesNotContain(advertised, a => IPAddress.IsLoopback(a));
+        Assert.DoesNotContain(advertised, a => a.Equals(IPAddress.Any));
+    }
+
+    [Fact]
+    public async Task A_push_from_a_lan_address_reaches_the_merge_path()
+    {
+        var lan = RequireLanAddress();
+
+        Load();
+        _hub.Start(_vm.LiveDocument, _vm.MergeFromNetwork);
+        SkipUnlessListening(_hub);
+
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        var response = await client.PostAsync(
+            $"http://{lan}:{Port}/push",
+            new StringContent(InventoryReader.Write(Doc("BOX-LAN", 3)), Encoding.UTF8, "application/json"));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("""{"ok":true,"containers":1,"items":1}""", await response.Content.ReadAsStringAsync());
+
+        var staged = Directory.GetFiles(Path.Combine(_directory, "inbox"), "push-*.json");
+        Assert.Single(staged);
+        Assert.Equal("BOX-LAN", InventoryReader.Read(File.ReadAllText(staged[0])).Containers[0].Id);
     }
 
     [Fact]

@@ -99,11 +99,34 @@ handheld-hosted hub would mean pushing merge state backwards over the wire.
 ### Using it
 
 1. Click **Start sharing**. The status bar shows the address, e.g. `Transfer: Sharing at
-   http://192.168.1.50:8756`.
+   http://192.168.1.50:8756`. If the PC has more than one network address they are all listed,
+   most likely to work first - an APIPA (`169.254.x.x`) address, if there is one, is listed last
+   because it is the one that works least often.
 2. On the CK65, open **Transfer**, type that address in, and press **Send to desktop** or **Get
    from desktop**. **Find desktops** can locate the PC automatically if discovery is available.
 3. Anything the handheld sends lands in **Sync review**, exactly like a file import. Nothing is
    applied until you accept it.
+
+#### If the handheld says it cannot reach the desktop
+
+The hub binds `0.0.0.0:8756` - every interface - so **no URL ACL reservation and no elevation is
+needed**, and no `netsh http add urlacl` step. It needs no package either: the socket is a
+`TcpListener` with a small HTTP/1.1 reader and writer in `Services/Transfer/TcpHttpListener.cs`.
+
+If the desktop is running as a normal user and the handheld still cannot connect, the cause is
+almost always the Windows Firewall blocking inbound TCP 8756 on the **Private** network profile.
+Check that first:
+
+```powershell
+Get-NetFirewallProfile -Profile Private | Select-Object Enabled,AllowInboundRules
+Get-NetFirewallRule -ErrorAction SilentlyContinue |
+    Where-Object DisplayName -like '*Scantron*' | Select-Object DisplayName,Enabled,Action
+```
+
+Allowing the app on the Private profile is enough. Note that the hub listens on all profiles, so
+on a shared warehouse network it is reachable by anything on that network that is not blocked -
+which is why nothing listens at all until you click **Start sharing**, and why **Stop sharing**
+really closes the port.
 
 Transfers are started from the handheld in both directions, because a pull is destructive on the
 device - it clears and replaces its whole database. So the desktop never initiates one, and
@@ -214,9 +237,10 @@ Scantron.Desktop/
   Mvvm/          ObservableObject, RelayCommand, RelayCommand<T>
   Services/      ConflictResolver, InventoryFileService, WorkspaceStore, Log
   Services/Transfer/
-                 HubEndpoints  the request surface, as a pure function
-                 TransferHub   the HttpListener socket around it
-                 InboxStore    stages inbound pushes to inbox\
+                 HubEndpoints     the request surface, as a pure function
+                 TransferHub      lifecycle and dispatch around the socket
+                 TcpHttpListener  the HTTP/1.1 server, bound on every interface
+                 InboxStore       stages inbound pushes to inbox\
   ViewModels/    MainViewModel, Container/Item/Conflict view models
   Views/         MainWindow, converters
 ```

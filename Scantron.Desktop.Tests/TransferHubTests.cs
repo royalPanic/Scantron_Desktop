@@ -1,3 +1,4 @@
+using System.Net;
 using Scantron.Core.Models;
 using Scantron.Core.Serialization;
 using Scantron.Desktop.Services.Transfer;
@@ -40,6 +41,72 @@ public sealed class TransferHubTests
         Func<InventoryDocument, HubResponse>? onPush = null,
         string deviceName = "DESK-01") =>
         HubEndpoints.Handle(method, path, body, current, onPush ?? Accept(), deviceName);
+
+        // ---- advertised addresses ----------------------------------------------------------------------
+
+        private static IPAddress Addr(string text) => IPAddress.Parse(text);
+
+        /// <summary>
+        /// The regression that matters: a wildcard bind with real addresses on the machine must
+        /// advertise those addresses.
+        /// </summary>
+        /// <remarks>
+        /// The wildcard prefix is the first bind attempt and the one most likely to succeed, so it is
+        /// what usually actually binds. It carries no address of its own, and deriving the status line
+        /// from the bound set alone therefore reported "this machine has no network address the
+        /// handheld can reach" on exactly the setups that worked - leaving the operator with no
+        /// address to type into the CK65.
+        /// </remarks>
+        [Fact]
+        public void A_wildcard_bind_advertises_the_machine_addresses_rather_than_nothing()
+        {
+            var advertised = TransferHub.SelectAdvertised(
+                [IPAddress.Any],
+                [Addr("192.168.1.50"), Addr("10.0.4.12")]);
+
+            Assert.Equal([Addr("192.168.1.50"), Addr("10.0.4.12")], advertised);
+        }
+
+        [Fact]
+        public void Loopback_and_the_wildcard_are_never_advertised()
+        {
+            var advertised = TransferHub.SelectAdvertised(
+                [IPAddress.Loopback, IPAddress.Any],
+                [Addr("127.0.0.1"), IPAddress.Any, Addr("192.168.1.50"), Addr("0.0.0.0")]);
+
+            Assert.Equal([Addr("192.168.1.50")], advertised);
+        }
+
+        [Fact]
+        public void A_link_local_address_is_advertised_last_rather_than_first()
+        {
+            // APIPA does work when nothing else does, so it cannot be dropped - but it is the address
+            // that works least often and must not be the first one read off the screen.
+            var advertised = TransferHub.SelectAdvertised(
+                [IPAddress.Any],
+                [Addr("169.254.10.20"), Addr("192.168.1.50")]);
+
+            Assert.Equal([Addr("192.168.1.50"), Addr("169.254.10.20")], advertised);
+        }
+
+        [Fact]
+        public void An_ipv6_link_local_address_keeps_its_scope_id_out_of_the_url()
+        {
+            var advertised = TransferHub.SelectAdvertised(
+                [IPAddress.Any],
+                [IPAddress.Parse("fe80::1%12"), Addr("192.168.1.50")]);
+
+            Assert.Equal([Addr("192.168.1.50"), IPAddress.Parse("fe80::1%12")], advertised);
+            Assert.DoesNotContain("%12", HubState.Sharing(["http://fe80::1:8756"]).Status, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void The_bound_set_is_used_only_when_enumeration_finds_nothing()
+        {
+            var advertised = TransferHub.SelectAdvertised([Addr("192.168.1.99")], []);
+
+            Assert.Equal([Addr("192.168.1.99")], advertised);
+        }
 
     // ---- /health -----------------------------------------------------------------------------------
 
