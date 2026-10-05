@@ -18,6 +18,7 @@ public sealed class ContainerViewModel : ObservableObject
     private string _id = "";
     private string _name = "";
     private string _location = "";
+    private string _barcode = "";
     private string _notes = "";
 
     public ContainerViewModel(Container? source = null)
@@ -25,6 +26,7 @@ public sealed class ContainerViewModel : ObservableObject
         _id = source?.Id ?? "";
         _name = source?.Name ?? "";
         _location = source?.Location ?? "";
+        _barcode = source?.Barcode ?? "";
         _notes = source?.Notes ?? "";
         UpdatedAt = source?.UpdatedAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
@@ -118,6 +120,19 @@ public sealed class ContainerViewModel : ObservableObject
         }
     }
 
+    /// <summary>Barcode scanned for this container, if any.</summary>
+    public string Barcode
+    {
+        get => _barcode;
+        set
+        {
+            if (SetProperty(ref _barcode, value ?? ""))
+            {
+                Touch();
+            }
+        }
+    }
+
     public string Notes
     {
         get => _notes;
@@ -190,11 +205,12 @@ public sealed class ContainerViewModel : ObservableObject
             Id = Id.Trim(),
             Name = Name.Trim(),
             Location = Location.Trim(),
-            Notes = Notes.Trim(),
-            UpdatedAt = UpdatedAt,
-            Items = Items.Select(i => i.ToItem()).ToList(),
-        };
-    }
+                Barcode = Barcode,
+                Notes = Notes.Trim(),
+                UpdatedAt = UpdatedAt,
+                Items = Items.Select(i => i.ToItem()).ToList(),
+            };
+        }
 
     public override string ToString() => string.IsNullOrWhiteSpace(_id) ? "(untagged)" : _id;
 }
