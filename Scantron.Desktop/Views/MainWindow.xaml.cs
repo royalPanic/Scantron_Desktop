@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using Microsoft.Win32;
 using Scantron.Core.Models;
 using Scantron.Desktop.ViewModels;
@@ -16,6 +17,18 @@ namespace Scantron.Desktop.Views;
 /// </remarks>
 public partial class MainWindow : Window
 {
+    /// <summary>
+    /// Property path of the item column this window has to watch.
+    /// </summary>
+    /// <remarks>
+    /// Matches the column's binding rather than its header text or its position. A
+    /// <see cref="DisplayIndex"/> comparison is the kind of coupling that survives right up until
+    /// someone reorders, inserts or hides a column, and then it stamps the wrong row in silence;
+    /// the header is one rename away from the same fate. The path is what the column is actually
+    /// for, so it is what the view keys off.
+    /// </remarks>
+    private const string QuantityBindingPath = nameof(ItemViewModel.Quantity);
+
     public MainWindow()
     {
         InitializeComponent();
@@ -39,10 +52,14 @@ public partial class MainWindow : Window
     /// </remarks>
     private void OnItemCellEditEnding(object? sender, DataGridCellEditEndingEventArgs e)
     {
-        if (e.Row.Item is not ItemViewModel item || e.Column.DisplayIndex != 2)
-        {
-            return;
-        }
+            // Identified by the binding path, which only a bound column has. An unbound or
+                    // auto-generated column therefore falls out here rather than being stamped by accident.
+                    var bound = e.Column as DataGridBoundColumn;
+                    if (e.Row.Item is not ItemViewModel item
+                        || !string.Equals((bound?.Binding as Binding)?.Path.Path, QuantityBindingPath, StringComparison.Ordinal))
+                    {
+                        return;
+                    }
 
         if (e.EditAction == DataGridEditAction.Cancel)
         {

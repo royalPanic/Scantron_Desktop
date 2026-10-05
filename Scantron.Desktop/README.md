@@ -16,11 +16,12 @@ will import.
 2. [The sync workflow](#-the-sync-workflow)
 3. [Transferring over Wi-Fi](#-transferring-over-wi-fi)
 4. [What the three panes do](#-what-the-three-panes-do)
-5. [Where files live](#-where-files-live)
-6. [Keyboard shortcuts](#-keyboard-shortcuts)
-7. [Rules this app will not break](#-rules-this-app-will-not-break)
-8. [Project layout](#-project-layout)
-9. [Building and testing](#-building-and-testing)
+5. [Look and feel](#look-and-feel)
+6. [Where files live](#-where-files-live)
+7. [Keyboard shortcuts](#-keyboard-shortcuts)
+8. [Rules this app will not break](#-rules-this-app-will-not-break)
+9. [Project layout](#-project-layout)
+10. [Building and testing](#-building-and-testing)
 
 ---
 
@@ -82,6 +83,39 @@ In practice:
 | **Containers** | Tags, labels and locations. Shows per-container unit totals and a warning badge for rows still missing a uuid. |
 | **Items** | The rows for the selected container, plus its metadata editor. Editable in place. |
 | **Sync review** | Conflicts from the last merge, the decision buttons, and an activity log. |
+
+---
+
+## Look and feel
+
+The UI is Material 3, and the palette is the handheld's own - primary blue `#1E88E5`,
+secondary teal `#00897B`, tertiary orange `#FB8C00`, exactly as
+[`Color.kt`](../Scantron/app/src/main/java/com/example/scantron/ui/theme/Color.kt) defines them. An
+operator moves between the CK65 and this PC all shift; an orange badge meaning "needs identity" on
+the device means the same thing here.
+
+Everything visual comes from [`Themes/MaterialTheme.xaml`](./Themes/MaterialTheme.xaml), which
+`App.xaml` merges once so every window resolves the same tokens. `App.xaml` itself holds only the
+converters and the few pane-level styles.
+
+**What came across from the device.** The top app bar, the secondary-container card on the
+container editor, the extended FAB for adding an item, the tag chip and unit-count assist chip on
+each container row, the flat Material data table, and the empty states ("No containers found",
+"This container is empty", "No conflicts") - the app used to show a blank rectangle instead.
+
+**Two deliberate departures.**
+
+- **Type is scaled up.** Android's 16sp body is about 9.6 WPF units, which is correct in physical
+  terms and unreadable in practice on a monitor at 100% scaling. The M3 scale is used by role, with
+  sizes raised for a screen read at arm's length.
+- **Neutrals are blue-grey, not the M3 baseline ramp.** The baseline ramp is a purple placeholder
+  the device ships because it overrides nothing. Inheriting it here would tint every surface lilac.
+  Structure, roles and state-layer opacities follow the spec; the hue does not.
+
+**No icon font.** The device uses `material-icons-extended`; adding a font package to a build that
+has to stay reproducible offline is a poor trade for icons this app does not need yet. Where the
+device uses an icon for an affordance, the desktop uses a labelled button - which is better for a
+keyboard-first data-entry tool anyway.
 
 ---
 
@@ -243,7 +277,8 @@ Scantron.Desktop/
                  InboxStore       stages inbound pushes to inbox\
   ViewModels/    MainViewModel, Container/Item/Conflict view models
   Views/         MainWindow, converters
-```
+    Themes/        MaterialTheme.xaml  - tokens and control templates, shared app-wide
+  ```
 
 `Scantron.Desktop` depends on `Scantron.Core` and nothing else. There is no MVVM framework and
 no file-dialog abstraction package: the view model takes paths rather than dialogs, which is
@@ -257,7 +292,7 @@ bytes to and from it.
 
 ```bash
 dotnet build                       # whole solution
-dotnet test                        # 141 tests
+dotnet test                        # 158 tests
 dotnet run --project Scantron.Desktop
 ```
 
