@@ -44,6 +44,24 @@
                                    Foreground="{StaticResource Brush.OnSecondaryContainer}"
                                    Text="{Binding HubStatus, StringFormat='Transfer: {0}'}" />
 
+                                                <!-- The handheld's address, for the direction the desktop initiates.
+                                                     Its own row for the same reason the hub status has one: the operator
+                                                     reads this off the CK65 and types it here, and it is the one thing that
+                                                     has to be legible when it matters. Both directions need an address,
+                                                     but the two are not the same address - the desktop's is shown on the
+                                                     status line above, this one is a scanner's. -->
+                                                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                                                    <TextBlock Text="Handheld address:" VerticalAlignment="Center" Margin="0,0,8,0"
+                                                               Style="{StaticResource Type.LabelMedium}"
+                                                               Foreground="{StaticResource Brush.OnSurfaceVariant}" />
+                                                    <TextBox Width="180" VerticalAlignment="Center"
+                                                             Text="{Binding HandheldAddress, UpdateSourceTrigger=PropertyChanged}"
+                                                             ToolTip="The address the CK65's Transfer screen shows. Needed only for Send to handheld." />
+                                                    <TextBlock Text="port 8758" VerticalAlignment="Center" Margin="8,0,0,0"
+                                                               Style="{StaticResource Type.BodySmall}"
+                                                               Foreground="{StaticResource Brush.OnSurfaceVariant}" />
+                                                </StackPanel>
+
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto" />
@@ -65,7 +83,7 @@
                                 <Button Style="{StaticResource Material.TextButton}" Content="Stop sharing" Command="{Binding StopSharingCommand}"
                                         ToolTip="Close the transfer hub" />
                                 <Button Style="{StaticResource Material.TextButton}" Content="Send to handheld" Command="{Binding PushToHandheldCommand}"
-                                        ToolTip="Make this document available for the handheld to pull (Ctrl+P)" />
+                                                                        ToolTip="Send this document to a handheld listening on the address above (Ctrl+P)" />
                                 <Button Style="{StaticResource Material.TextButton}" Content="Pull from handheld" Command="{Binding ReceiveFromHandheldCommand}"
                                         ToolTip="Staged when the handheld pushes to this PC - see the activity log" />
                             </StackPanel>

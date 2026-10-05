@@ -18,7 +18,7 @@ interchangeable by construction.
 2. [What this app is for](#-what-this-app-is-for)
 3. [The three-way merge](#-the-three-way-merge)
 4. [Item identity and merge keys](#-item-identity-and-merge-keys)
-5. [LAN transfer hub](#-lan-transfer-hub)
+5. [LAN transfer](#-lan-transfer)
 6. [Project structure](#-project-structure)
 7. [Tech stack](#-tech-stack)
 8. [Building, running and testing](#-building-running-and-testing)
@@ -115,7 +115,12 @@ two sides oscillating on different rows on every sync.
 
 ---
 
-## 📡 LAN transfer hub
+## 📡 LAN transfer
+
+Transfers work in **both** directions, because the person at the desk with a merged document is not
+always the person holding the scanner.
+
+### Handheld → desktop (port 8756)
 
 An HTTP endpoint on port **8756** that the handheld connects to:
 
@@ -131,12 +136,37 @@ There is no discovery: the operator reads the IP address off the screen and type
 handheld by hand, so that address gets a row of its own in the toolbar rather than being truncated
 beside the sync state.
 
+### Desktop → handheld (port 8758)
+
+**Send to handheld** (Ctrl+P) dials the scanner instead of waiting to be polled:
+
+| Endpoint | Method | Purpose |
+| :--- | :--- | :--- |
+| `/receive` | `POST` | Desktop sends its document; the handheld stages it for confirmation. |
+
+The handheld must be left listening on its Transfer screen — it binds `0.0.0.0:8758` for as long as
+**Receive from desktop** is on, and nothing is open otherwise. The operator types the scanner's
+address into **Handheld address** in the toolbar, which the scanner displays.
+
+An arriving push is **staged and confirmed, never imported on arrival**. The device shares the
+confirmation dialog with its pull path, because the consequence is identical: both clear and replace
+the whole database. A push that imported itself would let anything on the warehouse network replace a
+day's scanning with one unauthenticated request.
+
+`HandheldClient` is the desktop half of this direction. It never throws for a network reason — every
+outcome is a `HandheldResult` carrying a sentence an operator can act on — and it routes around the
+system proxy, since a scanner on the LAN is always addressed directly.
+
 Bodies are the **raw export document** — no envelope, no base64, no zip. Both sides already have a
 parser and a validator for exactly this document, so an envelope would be a second place to keep in
-step and a second way for the halves to disagree. `/push` acknowledges with
-`{"ok":true,"containers":N,"items":M}`; error bodies are plain text, because the handheld surfaces
-them verbatim in a toast and an operator standing in an aisle can act on a sentence but not on a
+step and a second way for the halves to disagree. Acknowledgements are
+`{"ok":true,"containers":N,"items":M}`; error bodies are plain text, because both apps surface them
+verbatim to the operator and an operator standing in an aisle can act on a sentence but not on a
 JSON error envelope.
+
+The three fixed ports are distinct and none are operator-configurable: **8756** (desktop hub),
+**8757** (UDP discovery probe), **8758** (handheld listener). A second copy of either app holding
+the wrong port is a failure mode worth more than the flexibility.
 
 Some deliberate choices worth knowing before modifying this code:
 
@@ -154,9 +184,13 @@ Some deliberate choices worth knowing before modifying this code:
 - **16 MB body cap** (`HubEndpoints.MaxBodyBytes`), enforced on raw bytes as they arrive. This is an
   unauthenticated endpoint; without the cap a malformed request is a way to exhaust the memory of the
   machine holding the stock count.
+- **`AsyncRelayCommand` for the push.** `ICommand.Execute` is void, so there is nowhere to await a
+  socket without it — doing the work inline would freeze the window for the length of the handheld's
+  timeout.
 
 `HubEndpoints` is a pure function — `(method, path, body) → (status, contentType, body)` — so the
-whole contract, failure paths included, is covered by tests without binding a port.
+whole inbound contract, failure paths included, is covered by tests without binding a port.
+`HandheldClient.Interpret` is separated out for the same reason on the outbound side.
 
 ---
 
@@ -172,10 +206,11 @@ Scantron_Desktop/
 │
 ├── Scantron.Desktop/                    net8.0-windows, WPF
 │   ├── App.xaml(.cs)                    Entry point, unhandled-exception logging
-│   ├── Mvvm/                            ObservableObject, RelayCommand
+│   ├── Mvvm/                            ObservableObject, RelayCommand, AsyncRelayCommand
 │   ├── Models → ViewModels/             MainViewModel and friends
 │   ├── Services/                        WorkspaceStore, InventoryFileService, ConflictResolver, Log
-│   │   └── Transfer/                    TransferHub, TcpHttpListener, HubEndpoints, InboxStore
+│   │   └── Transfer/                    TransferHub, TcpHttpListener, HubEndpoints, InboxStore,
+│   │                                    HandheldClient
 │   ├── Themes/                          Material 3 resources
 │   └── Views/MainWindow.xaml            The single window
 │
@@ -295,6 +330,19 @@ Close the other instance, or check `scantron.log`.
 **The handheld cannot connect to the address on screen.**
 Confirm both are on the same network and that Windows Firewall is not blocking inbound traffic on
 port 8756. The address shown is what the hub actually bound, not a guess.
+
+**Send to handheld reports that no address is set.**
+**Handheld address** is the scanner's, not this PC's — open the CK65's Transfer screen and read it
+off there. It accepts a bare IP or a pasted `http://…:8758`; the scheme, path and port are stripped.
+
+**Send to handheld says it could not reach the handheld.**
+The scanner is not listening. Its Transfer screen has to be open with **Receive from desktop** still
+showing "Listening" — the socket closes when the screen goes away. Check Windows Firewall for outbound
+traffic too; this direction dials the scanner from the PC, so the rule that matters is outbound.
+
+**Send to handheld appears to succeed but the scanner shows nothing.**
+The device stages a push and waits for the operator to confirm it, exactly as it does for a pull. The
+desktop's acknowledgement means *received and staged*, not *imported*.
 
 **`/pull` answers "Nothing to send - open a document on the desktop first."**
 Intentional. The handheld imports by clearing and replacing, so serving an empty document would

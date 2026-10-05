@@ -1,5 +1,6 @@
 using Scantron.Core.Models;
 using Scantron.Core.Serialization;
+using Scantron.Desktop.Mvvm;
 using Scantron.Desktop.Services;
 using Scantron.Desktop.Services.Transfer;
 using Scantron.Desktop.ViewModels;
@@ -197,7 +198,7 @@ public sealed class MainViewModelTransferTests : IDisposable
     }
 
     [Fact]
-    public void Sending_to_the_handheld_requires_a_document_and_passes_the_export_gate()
+        public async Task Sending_to_the_handheld_requires_a_document_and_passes_the_export_gate()
     {
         var vm = NewViewModel();
 
@@ -208,31 +209,52 @@ public sealed class MainViewModelTransferTests : IDisposable
 
                 // Press the button rather than calling the handler: Ctrl+P is bound to this command,
                 // and a test that bypassed it would keep passing if the binding ever came loose.
-                vm.PushToHandheldCommand.Execute(null);
+                    //
+                    // No address is set, so there is nowhere to send. The point of this case is the
+                    // *guard* and the export gate, not the network - the button has to say why it did
+                    // nothing rather than claim a transfer happened.
+                    vm.PushToHandheldCommand.Execute(null);
+                    await WaitForCommandToFinishAsync(vm.PushToHandheldCommand);
 
-        Assert.True(vm.HasServedToHandheld);
-                Assert.Contains("handheld", vm.StatusMessage, StringComparison.OrdinalIgnoreCase);
+            Assert.False(vm.HasServedToHandheld);
+                    Assert.Contains("Handheld address", vm.StatusMessage, StringComparison.OrdinalIgnoreCase);
+                }
 
-                var response = SendToHandheld(vm);
-                Assert.Equal(200, response.StatusCode);
-                Assert.Equal("""{"ok":true,"containers":1,"items":1}""", response.Body);
+        [Fact]
+        public async Task A_document_the_handheld_would_reject_is_not_offered_to_it()
+        {
+            var vm = NewViewModel();
+            Load(vm, Doc());
+            vm.HandheldAddress = "127.0.0.1";
+
+            // Valid on the way in, invalid on the way out: the row is renamed to blank.
+            vm.Containers[0].Items[0].Name = "   ";
+
+            await SendToHandheld(vm);
+
+            // Refused before the socket is opened, so nothing reached a device - and the flag that
+            // reports a delivered transfer stays false.
+            Assert.False(vm.HasServedToHandheld);
+                    Assert.Contains("rejected by the handheld", vm.StatusMessage, StringComparison.OrdinalIgnoreCase);
+                }
+
+        /// <summary>
+        /// Waits for an async command to finish.
+        /// </summary>
+        /// <remarks>
+        /// <c>AsyncRelayCommand</c> is fire-and-forget, so <c>Execute</c> returns before the handler
+        /// has awaited its socket. Polling <c>IsBusy</c> rather than sleeping a fixed time keeps the
+        /// assertion deterministic and stops a slow machine from failing a passing test.
+        /// </remarks>
+        private static async Task WaitForCommandToFinishAsync(AsyncRelayCommand command)
+        {
+            for (var attempt = 0; attempt < 300 && !command.CanExecute(null); attempt++)
+            {
+                await Task.Delay(20);
             }
 
-    [Fact]
-    public void A_document_the_handheld_would_reject_is_not_offered_to_it()
-    {
-        var vm = NewViewModel();
-        Load(vm, Doc());
-
-        // Valid on the way in, invalid on the way out: the row is renamed to blank.
-        vm.Containers[0].Items[0].Name = "   ";
-
-                var response = SendToHandheld(vm);
-
-        Assert.Equal(400, response.StatusCode);
-        Assert.False(vm.HasServedToHandheld);
-        Assert.Contains("rejected by the handheld", response.Body, StringComparison.OrdinalIgnoreCase);
-    }
+            Assert.True(command.CanExecute(null), "The command never finished.");
+        }
 
     [Fact]
     public void Transfer_commands_are_disabled_until_a_document_exists()
@@ -329,12 +351,12 @@ public sealed class MainViewModelTransferTests : IDisposable
         /// Runs the send path directly and reports what the hub relays back to the handheld.
         /// </summary>
         /// <remarks>
-        /// Internal rather than public, and for the same reason the push path is: a test should drive
-        /// the code that actually runs. The button wiring is covered separately by
-        /// <see cref="Sending_to_the_handheld_requires_a_document_and_passes_the_export_gate"/>,
-        /// which asserts that pressing the command is what moves the state.
-        /// </remarks>
-        private static HubResponse SendToHandheld(MainViewModel vm) => vm.SendToHandheld();
+            /// Internal rather than public, and for the same reason the push path is: a test should drive
+            /// the code that actually runs. The button wiring is covered separately by
+            /// <see cref="Sending_to_the_handheld_requires_a_document_and_passes_the_export_gate"/>,
+            /// which asserts that pressing the command is what moves the state.
+            /// </remarks>
+            private static Task SendToHandheld(MainViewModel vm) => vm.SendToHandheld();
 
         private string WriteTo(string name, InventoryDocument document)
     {

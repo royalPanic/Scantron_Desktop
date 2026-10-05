@@ -35,8 +35,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly WorkspaceStore _workspace;
         private readonly InboxStore _inbox;
         private readonly TransferHub _hub;
-        private bool _disposed;
-        private bool _served;
+            private readonly HandheldClient _handheld;
+            private bool _disposed;
+            private bool _served;
 
         private InventoryDocument? _document;
         private InventoryDocument? _mergeCandidate;
@@ -45,15 +46,17 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         private ConflictViewModel? _selectedConflict;
         private string _statusMessage = "Ready.";
         private string _syncState = "Not synced";
-        private string? _lastExportPath;
+                private string _handheldAddress = string.Empty;
+                private string? _lastExportPath;
         private bool _isBusy;
     private bool _hasWorkingDocument;
 
-        public MainViewModel(WorkspaceStore? workspace = null, InboxStore? inbox = null, TransferHub? hub = null)
+        public MainViewModel(WorkspaceStore? workspace = null, InboxStore? inbox = null, TransferHub? hub = null, HandheldClient? handheld = null)
         {
             _workspace = workspace ?? new WorkspaceStore();
             _inbox = inbox ?? new InboxStore();
             _hub = hub ?? new TransferHub();
+                    _handheld = handheld ?? new HandheldClient();
 
             // The hub reports from its serve loop. Reflected onto the view model rather than bound
             // directly, because the toolbar has to be able to change the buttons the state implies -
@@ -78,8 +81,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             () => SelectedConflict?.TakeRemote(), () => SelectedConflict is { IsResolved: false });
                 StartSharingCommand = new RelayCommand(StartSharing);
                 StopSharingCommand = new RelayCommand(StopSharingAsync, () => _hub.State.Listening);
-                PushToHandheldCommand = new RelayCommand(() => PushToHandheld(), () => CanPushToHandheld);
-                ReceiveFromHandheldCommand = new RelayCommand(() => ShowHandheldTransfer(), () => CanReceiveFromHandheld);
+                                // Async because it waits on a socket. The previous implementation was synchronous
+                                // and had nothing to wait for, which is exactly why it could not actually send.
+                                PushToHandheldCommand = new AsyncRelayCommand(PushToHandheld, () => CanPushToHandheld);
+                                ReceiveFromHandheldCommand = new RelayCommand(() => ShowHandheldTransfer(), () => CanReceiveFromHandheld);
 
         LoadWorkspace();
     }
@@ -197,13 +202,46 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public InventoryDocument? LiveDocument() => _hasWorkingDocument ? BuildDocument() : null;
 
         /// <summary>
-        /// True when a pull from the desktop has already been answered this session.
+        /// Address of the handheld to push to, as typed by the operator.
         /// </summary>
         /// <remarks>
-        /// Pulling is destructive on the handheld - it clears and replaces its whole database - so
-        /// the app never pushes the document anywhere on its own. The file is put on the desk, the
-        /// operator carries it over, and the pull button exists to stage what arrived. Flagging that
-        /// it has happened is the only part of the exchange the desktop can observe.
+        /// <para>
+        /// The reverse of <see cref="HubStatus"/>, and needed for the same reason. There is no
+        /// discovery for the device-initiated direction - the scanner cannot be relied on to hold a
+        /// broadcast responder while docked - so the operator reads the address off the CK65 and types
+        /// it here, exactly as they type the desktop's address into the scanner for the other
+        /// direction.
+        /// </para>
+        /// <para>
+        /// Kept as typed rather than normalised on the way in, because the operator needs to see what
+        /// they typed when a transfer fails. The value is sanitised at the point of use, by
+        /// <see cref="HandheldClient"/>, which is the same place and the same rule the device applies
+        /// to a desktop address - so a pasted URL works in both directions.
+        /// </para>
+        /// </remarks>
+        public string HandheldAddress
+        {
+            get => _handheldAddress;
+            set
+            {
+                if (SetProperty(ref _handheldAddress, value))
+                {
+                    // The push guard does not read this, but the button's tooltip and the status line
+                    // both depend on whether an address is set, and a stale enabled button is the
+                    // exact failure being fixed here.
+                    RaiseGuards();
+                }
+            }
+        }
+
+        /// <summary>
+            /// True when a document has actually reached the handheld this session.
+        /// </summary>
+        /// <remarks>
+            /// Both directions feed this: a pull the hub served, and a push this desktop initiated
+            /// and that came back acknowledged. Only a delivery that was actually confirmed sets it -
+            /// the previous implementation set it unconditionally, which is how a button that sent
+            /// nothing still reported a successful transfer.
         /// </remarks>
         public bool HasServedToHandheld
         {
@@ -227,7 +265,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public RelayCommand TakeSelectedConflictRemoteCommand { get; }
         public RelayCommand StartSharingCommand { get; }
         public RelayCommand StopSharingCommand { get; }
-        public RelayCommand PushToHandheldCommand { get; }
+                public AsyncRelayCommand PushToHandheldCommand { get; }
         public RelayCommand ReceiveFromHandheldCommand { get; }
 
     /// <summary>
@@ -300,13 +338,15 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         private bool CanStopShare => !IsBusy && _hub.State.Listening;
 
-        /// <summary>Everything a <c>/pull</c> serves has to survive the export gate first.</summary>
-        /// <remarks>
-        /// Keyed off <c>LiveDocument</c> rather than <c>_document</c>, which is never null: a cold
-        /// start adopts an empty one so the grid has something to bind to. Offering to send that
-        /// would be offering the empty document whose delivery the whole 503 rule exists to prevent.
-        /// </remarks>
-        private bool CanPushToHandheld => _hasWorkingDocument && !IsBusy;
+        /// <summary>
+                /// Everything a <c>/pull</c> serves has to survive the export gate first.
+                /// </summary>
+                /// <remarks>
+                /// Keyed off <c>LiveDocument</c> rather than <c>_document</c>, which is never null: a cold
+                /// start adopts an empty one so the grid has something to bind to. Offering to send that
+                /// would be offering the empty document whose delivery the whole 503 rule exists to prevent.
+                /// </remarks>
+                private bool CanPushToHandheld => _hasWorkingDocument && !IsBusy;
 
         private bool CanReceiveFromHandheld => _hasWorkingDocument && !IsBusy && _hub.State.Listening;
 
@@ -682,33 +722,69 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         private void StopSharingAsync() => _ = _hub.StopAsync();
 
     /// <summary>
-    /// Offers the live document to a handheld that asks for it.
+        /// Sends the live document to a handheld that is listening for it.
     /// </summary>
     /// <remarks>
-    /// Runs through the same gate as a file export, because it is the same promise: whatever
-    /// leaves this machine over the network is a document the handheld is entitled to import
-    /// without losing what it already holds. <c>/pull</c> refuses outright when there is nothing
-    /// loaded - see <c>HubEndpoints</c> - so this only ever sees a real document.
-    /// </remarks>
-    private HubResponse PushToHandheld()
-    {
-        var document = BuildDocument();
-        _document = document;
-
-        if (InventoryFileService.Validate(document) is { } invalid)
+        /// <para>
+        /// This is the button that used to do nothing. It validated the document, built a
+        /// <see cref="HubResponse"/> that described a transfer that had already happened, and returned
+        /// it to a caller that discarded it - so no bytes ever left the machine, while the status line
+        /// claimed the handheld had pulled the document. The response was a fiction.
+        /// </para>
+        /// <para>
+        /// It now dials the handheld, and only reports what actually came back. The two directions
+        /// are both real: this one is desktop-initiated and goes out through
+        /// <see cref="HandheldClient"/>, while <c>/pull</c> remains the path the device takes when the
+        /// operator works from the scanner. Neither replaces the other, because neither device can be
+        /// relied on to be the one holding the button.
+        /// </para>
+        /// <para>
+        /// Runs through the same export gate as a file, because it is the same promise: whatever
+        /// leaves this machine is a document the handheld is entitled to import without losing what it
+        /// already holds. The gate runs before the socket is opened, so an invalid document never
+        /// costs the operator a trip across the warehouse.
+        /// </para>
+        /// </remarks>
+        private async Task PushToHandheld()
         {
-            var message = $"Not sent - this document would be rejected by the handheld:{Environment.NewLine}{invalid}";
-            Log.Warning($"Refused a /pull: {invalid}");
-            StatusMessage = message;
-            AppendActivity(message);
-            return new HubResponse(400, HubResponse.Text, message);
-        }
+            var document = BuildDocument();
+            _document = document;
 
-        HasServedToHandheld = true;
-        StatusMessage = $"Handheld pulled {Containers.Count} container(s). Confirm the import on the device.";
-        AppendActivity($"Handheld pulled {Containers.Count} container(s) over the network.");
-        return new HubResponse(200, HubResponse.Json, HubEndpoints.Acknowledgement(document));
-    }
+            if (InventoryFileService.Validate(document) is { } invalid)
+            {
+                var message = $"Not sent - this document would be rejected by the handheld:{Environment.NewLine}{invalid}";
+                Log.Warning($"Refused a push to the handheld: {invalid}");
+                StatusMessage = message;
+                AppendActivity(message);
+                return;
+            }
+
+            // The exact bytes an export to file would write, so the two routes stay interchangeable.
+            var payload = HubEndpoints.ToExportJson(document);
+
+            IsBusy = true;
+            StatusMessage = $"Sending to {HandheldAddress}...";
+
+            try
+            {
+                var result = await _handheld.SendAsync(HandheldAddress, payload).ConfigureAwait(true);
+
+                StatusMessage = result.Message;
+                AppendActivity(result.Message);
+
+                if (result.Success)
+                {
+                    // Only a transfer that was actually delivered counts as served. The flag is what
+                    // the status bar reports, so setting it unconditionally would reintroduce the
+                    // original lie in a second place.
+                    HasServedToHandheld = true;
+                }
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
 
     /// <summary>
         /// Explains that the pull half of a transfer is driven from the handheld.
@@ -816,6 +892,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             // job rather than the status line's.
             Log.Error("The transfer hub did not close cleanly", ex);
         }
+
+                // The push client owns no socket of its own between sends, so this is about releasing the
+                // handler rather than tearing anything down that could fail.
+                _handheld.Dispose();
     }
 
         /// <summary>
@@ -833,9 +913,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return ReceiveFromNetwork(remote);
         }
 
-        /// <summary>Publishes the live document to a handheld that pulls it.</summary>
-        /// <remarks>Internal for the same reason as <see cref="MergeFromNetwork"/>.</remarks>
-        internal HubResponse SendToHandheld() => PushToHandheld();
+        /// <summary>Publishes the live document to a listening handheld. Internal for the same reason.</summary>
+                internal Task SendToHandheld() => PushToHandheld();
 
     /// <summary>Rebuilds the editable view from an immutable document.</summary>
     private void Adopt(InventoryDocument document)
