@@ -14,12 +14,14 @@ will import.
 
 1. [Running it](#-running-it)
 2. [The sync workflow](#-the-sync-workflow)
-3. [What the three panes do](#-what-the-three-panes-do)
-4. [Where files live](#-where-files-live)
-5. [Keyboard shortcuts](#-keyboard-shortcuts)
-6. [Rules this app will not break](#-rules-this-app-will-not-break)
-7. [Project layout](#-project-layout)
-8. [Building and testing](#-building-and-testing)
+3. [Transferring over Wi-Fi](#-transferring-over-wi-fi)
+4. [What the three panes do](#-what-the-three-panes-do)
+5. [Look and feel](#look-and-feel)
+6. [Where files live](#-where-files-live)
+7. [Keyboard shortcuts](#-keyboard-shortcuts)
+8. [Rules this app will not break](#-rules-this-app-will-not-break)
+9. [Project layout](#-project-layout)
+10. [Building and testing](#-building-and-testing)
 
 ---
 
@@ -84,6 +86,117 @@ In practice:
 
 ---
 
+## Look and feel
+
+The UI is Material 3, and the palette is the handheld's own - primary blue `#1E88E5`,
+secondary teal `#00897B`, tertiary orange `#FB8C00`, exactly as
+[`Color.kt`](../Scantron/app/src/main/java/com/example/scantron/ui/theme/Color.kt) defines them. An
+operator moves between the CK65 and this PC all shift; an orange badge meaning "needs identity" on
+the device means the same thing here.
+
+Everything visual comes from [`Themes/MaterialTheme.xaml`](./Themes/MaterialTheme.xaml), which
+`App.xaml` merges once so every window resolves the same tokens. `App.xaml` itself holds only the
+converters and the few pane-level styles.
+
+**What came across from the device.** The top app bar, the secondary-container card on the
+container editor, the extended FAB for adding an item, the tag chip and unit-count assist chip on
+each container row, the flat Material data table, and the empty states ("No containers found",
+"This container is empty", "No conflicts") - the app used to show a blank rectangle instead.
+
+**Two deliberate departures.**
+
+- **Type is scaled up.** Android's 16sp body is about 9.6 WPF units, which is correct in physical
+  terms and unreadable in practice on a monitor at 100% scaling. The M3 scale is used by role, with
+  sizes raised for a screen read at arm's length.
+- **Neutrals are blue-grey, not the M3 baseline ramp.** The baseline ramp is a purple placeholder
+  the device ships because it overrides nothing. Inheriting it here would tint every surface lilac.
+  Structure, roles and state-layer opacities follow the spec; the hue does not.
+
+**No icon font.** The device uses `material-icons-extended`; adding a font package to a build that
+has to stay reproducible offline is a poor trade for icons this app does not need yet. Where the
+device uses an icon for an affordance, the desktop uses a labelled button - which is better for a
+keyboard-first data-entry tool anyway.
+
+---
+
+## Transferring over Wi-Fi
+
+Files can move between the handheld and this PC over a shared network, with no USB cable and no
+cloud. It is a transfer, not a live sync: the same JSON documents a stick would carry, moved over
+HTTP instead.
+
+**The desktop hosts; the handheld connects.** The CK65 is a battery-powered warehouse device that
+cannot be relied on to hold a listening socket, while this PC is on and on the network. More to the
+point, the three-way merge, the baseline and the conflict review all live here - so a
+handheld-hosted hub would mean pushing merge state backwards over the wire.
+
+### Using it
+
+1. Click **Start sharing**. The status bar shows the address, e.g. `Transfer: Sharing at
+   http://192.168.1.50:8756`. If the PC has more than one network address they are all listed,
+   most likely to work first - an APIPA (`169.254.x.x`) address, if there is one, is listed last
+   because it is the one that works least often.
+2. On the CK65, open **Transfer**, type that address in, and press **Send to desktop** or **Get
+   from desktop**. **Find desktops** can locate the PC automatically if discovery is available.
+3. Anything the handheld sends lands in **Sync review**, exactly like a file import. Nothing is
+   applied until you accept it.
+
+#### If the handheld says it cannot reach the desktop
+
+The hub binds `0.0.0.0:8756` - every interface - so **no URL ACL reservation and no elevation is
+needed**, and no `netsh http add urlacl` step. It needs no package either: the socket is a
+`TcpListener` with a small HTTP/1.1 reader and writer in `Services/Transfer/TcpHttpListener.cs`.
+
+If the desktop is running as a normal user and the handheld still cannot connect, the cause is
+almost always the Windows Firewall blocking inbound TCP 8756 on the **Private** network profile.
+Check that first:
+
+```powershell
+Get-NetFirewallProfile -Profile Private | Select-Object Enabled,AllowInboundRules
+Get-NetFirewallRule -ErrorAction SilentlyContinue |
+    Where-Object DisplayName -like '*Scantron*' | Select-Object DisplayName,Enabled,Action
+```
+
+Allowing the app on the Private profile is enough. Note that the hub listens on all profiles, so
+on a shared warehouse network it is reachable by anything on that network that is not blocked -
+which is why nothing listens at all until you click **Start sharing**, and why **Stop sharing**
+really closes the port.
+
+Transfers are started from the handheld in both directions, because a pull is destructive on the
+device - it clears and replaces its whole database. So the desktop never initiates one, and
+**Pull from handheld** explains where to go rather than pretending to fetch. **Send to handheld**
+publishes the current document so the scanner can collect it.
+
+### The wire contract
+
+| Method | Path | Body |
+| --- | --- | --- |
+| `GET` | `/health` | plain text - is this the right machine, and is it sharing |
+| `POST` | `/push` | the unmodified Scantron export document |
+| `GET` | `/pull` | the unmodified Scantron export document |
+
+The body *is* the ordinary export file, with no envelope around it. Both ends already parse and
+validate exactly this document, so wrapping it would mean a second place for the two halves to
+disagree - and a file pushed over Wi-Fi has to be interchangeable with the same file moved over
+USB, which is surest when the bytes are the same bytes.
+
+### Security posture
+
+Plain HTTP with no authentication, on a closed network with no internet path. Adding TLS to a
+certificate-less self-signed setup on a CK65 costs more here than it buys.
+
+Within that, three things are enforced:
+
+- **Nothing listens until you ask.** The hub is inert at startup and closes the moment you switch
+  sharing off, so an endpoint that can read and overwrite the day's stock count does not outlive
+  the shift that needed it.
+- **Every document is validated before use.** Nothing is written and no merge happens on bytes
+  that have not been through the same reader and validator a file import would.
+- **Bodies are capped at 16 MB**, refused on arrival, so a malformed request cannot exhaust the
+  memory of the machine holding the inventory.
+
+---
+
 ## Where files live
 
 All paths are relative to the executable's directory.
@@ -92,6 +205,7 @@ All paths are relative to the executable's directory.
 | --- | --- |
 | `workspace.current.json` | The document you are editing. |
 | `workspace.base.json` | Last mutually-agreed snapshot - the third merge input. |
+| `inbox\push-*.json` | Every transfer the handheld sent, kept for the last 20 pushes. |
 | `scantron.log` | Tiered diagnostic log (timestamp, level, pid). |
 
 Both workspace files are written in the **device export format** and parsed by
@@ -112,6 +226,7 @@ rather than a truncated one.
 | `Ctrl+I` | Import from the handheld |
 | `Ctrl+D` | Add container |
 | `Ctrl+Enter` | Accept the pending merge |
+| `Ctrl+P` | Send to handheld - make this document available for the scanner to pull |
 
 ---
 
@@ -137,6 +252,15 @@ These are enforced in code and pinned by tests, because each one costs real stoc
 - **Duplicate uuids are never collapsed.** Two rows sharing one uuid are both preserved, matching
   the device's `assignMissingItemUuids` behaviour, which re-mints rather than merging. The UI
   maps items one-to-one and never re-groups by uuid.
+- **A transfer never becomes a second merge path.** An inbound push goes through the same
+  `MergeDocument` call a file import uses, so a rule changed for imports cannot leave transfers
+  behaving differently. A test pins the two to the same result.
+- **Nothing is listening until you start sharing.** The hub is inert at startup.
+- **An empty document is never sent to a device that would read it as "delete everything".** With
+  no document loaded, `/pull` answers `503` and says so. A deliberately empty document the
+  operator created is still served, because there the emptiness was asked for.
+- **A pull is never started from this side.** It is destructive on the handheld, which clears and
+  replaces its database, so both directions are initiated on the device.
 
 ---
 
@@ -146,13 +270,21 @@ These are enforced in code and pinned by tests, because each one costs real stoc
 Scantron.Desktop/
   Mvvm/          ObservableObject, RelayCommand, RelayCommand<T>
   Services/      ConflictResolver, InventoryFileService, WorkspaceStore, Log
+  Services/Transfer/
+                 HubEndpoints     the request surface, as a pure function
+                 TransferHub      lifecycle and dispatch around the socket
+                 TcpHttpListener  the HTTP/1.1 server, bound on every interface
+                 InboxStore       stages inbound pushes to inbox\
   ViewModels/    MainViewModel, Container/Item/Conflict view models
   Views/         MainWindow, converters
-```
+    Themes/        MaterialTheme.xaml  - tokens and control templates, shared app-wide
+  ```
 
 `Scantron.Desktop` depends on `Scantron.Core` and nothing else. There is no MVVM framework and
 no file-dialog abstraction package: the view model takes paths rather than dialogs, which is
-what lets the entire import-merge-resolve-accept path be tested without WPF.
+what lets the entire import-merge-resolve-accept path be tested without WPF. The same idea shapes
+the hub - all of the meaning lives in a pure `HubEndpoints.Handle`, and the socket layer only moves
+bytes to and from it.
 
 ---
 
@@ -160,11 +292,17 @@ what lets the entire import-merge-resolve-accept path be tested without WPF.
 
 ```bash
 dotnet build                       # whole solution
-dotnet test                        # 88 tests
+dotnet test                        # 158 tests
 dotnet run --project Scantron.Desktop
 ```
 
 `Scantron.Desktop.Tests` covers the parts where a mistake loses stock: conflict-to-row mapping
 (including the ambiguous legacy case that is refused rather than guessed), baseline persistence,
 the export validation gate, and the full merge workflow driven through the view model.
+
+The transfer hub is covered at two levels. `TransferHubTests` drives
+`HubEndpoints.Handle` - the whole request surface as a pure function - so every route, status
+code and failure message is reachable without binding a port. `TransferHubEndToEndTests` then
+runs the same contract over a real loopback socket with a real `HttpClient`, which is what proves
+the socket layer is wired to that core and that a push reaches the actual merge path.
 </path><file_text>

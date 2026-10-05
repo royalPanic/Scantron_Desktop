@@ -9,8 +9,8 @@ namespace Scantron.Core.Serialization;
 /// <remarks>
 /// Deliberately separate from <see cref="Models.InventoryDocument"/> so the wire format can stay
 /// frozen while the domain model evolves. Property names are camelCase to match what the Android
-/// app emits and expects; the <c>[JsonPropertyName]</c> attributes pin them explicitly so a C#
-/// rename can never silently change the contract.
+/// app emits and expects; the <c>[JsonPropertyName]</c> attributes pin them explicitly so a C# rename
+/// can never silently change the contract.
 /// </remarks>
 public sealed class ContainerDto
 {
@@ -22,6 +22,9 @@ public sealed class ContainerDto
 
     [JsonPropertyName("location")]
     public string? Location { get; set; }
+
+    [JsonPropertyName("barcode")]
+    public string? Barcode { get; set; }
 
     [JsonPropertyName("notes")]
     public string? Notes { get; set; }

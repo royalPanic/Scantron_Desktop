@@ -18,6 +18,9 @@ public sealed record Container
     /// <summary>Physical location, e.g. "Shelf 2-A".</summary>
     public string Location { get; init; } = "";
 
+    /// <summary>Barcode scanned for this container, if any.</summary>
+    public string? Barcode { get; init; }
+
     /// <summary>Free-form details.</summary>
     public string Notes { get; init; } = "";
 
@@ -27,8 +30,8 @@ public sealed record Container
     /// </summary>
     public long UpdatedAt { get; init; }
 
-        /// <summary>
-        /// Items held in this container. An empty list is legal and means an empty container.
-        /// </summary>
-        public IReadOnlyList<Item> Items { get; init; } = [];
-    }
+    /// <summary>
+    /// Items held in this container. An empty list is legal and means an empty container.
+    /// </summary>
+    public IReadOnlyList<Item> Items { get; init; } = [];
+}
