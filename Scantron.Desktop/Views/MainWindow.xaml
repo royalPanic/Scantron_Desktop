@@ -2,11 +2,13 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Scantron - Container Inventory"
-        Height="720" Width="1280"
-        MinHeight="560" MinWidth="1000"
-        Background="{StaticResource ChromeBrush}"
-        Foreground="{StaticResource TextBrush}"
-        TextOptions.TextFormattingMode="Display">
+        Height="760" Width="1320"
+        MinHeight="600" MinWidth="1080"
+        Background="{StaticResource Brush.Surface}"
+        Foreground="{StaticResource Brush.OnSurface}"
+        TextOptions.TextFormattingMode="Display"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True">
 
     <Window.InputBindings>
         <!-- Ctrl-based shortcuts throughout: this is a data-entry tool, so the keyboard path
@@ -25,10 +27,11 @@
 
     <DockPanel>
 
-        <!-- Toolbar -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}"
-                        BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,0,0,1"
-                        Padding="12,8">
+        <!-- Top app bar. Surface-variant, matching the TopAppBar colour the device's screens
+             use, so the two apps present the same band of colour at the top of the window. -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource Brush.SurfaceVariant}"
+                        BorderBrush="{StaticResource Brush.OutlineVariant}" BorderThickness="0,0,0,1"
+                        Padding="16,8">
                     <DockPanel>
 
                         <!-- Transfer.
@@ -37,6 +40,8 @@
                              off this PC and type into the CK65, and squeezing it beside SyncState is how
                              it ends up truncated exactly when it matters. -->
                         <TextBlock DockPanel.Dock="Bottom" Margin="0,6,0,0" TextWrapping="Wrap"
+                                   Style="{StaticResource Type.BodySmall}"
+                                   Foreground="{StaticResource Brush.OnSecondaryContainer}"
                                    Text="{Binding HubStatus, StringFormat='Transfer: {0}'}" />
 
                         <Grid>
@@ -46,39 +51,46 @@
                             </Grid.ColumnDefinitions>
 
                             <StackPanel Orientation="Horizontal" Grid.Column="0">
-                                <Button Content="New" Command="{Binding NewCommand}" ToolTip="Start an empty document (Ctrl+N)" />
-                                <Button Content="Open..." Margin="6,0,0,0" Command="{Binding OpenDialogCommand}" ToolTip="Open an export file (Ctrl+O)" />
-                                <Button Content="Export..." Margin="6,0,0,0" Command="{Binding SaveDialogCommand}" ToolTip="Write a file for the handheld (Ctrl+S)" />
-                                <Rectangle Width="1" Margin="12,4" Fill="{StaticResource BorderBrushSoft}" />
-                                <Button Content="Import from handheld..." Margin="12,0,0,0"
-                                        Command="{Binding ImportDialogCommand}" ToolTip="Merge a handheld export (Ctrl+I)" />
-                                <Rectangle Width="1" Margin="12,4" Fill="{StaticResource BorderBrushSoft}" />
-                                <Button Content="Start sharing" Command="{Binding StartSharingCommand}"
+                                <TextBlock Text="Scantron" Margin="0,0,12,0"
+                                           Style="{StaticResource Type.TitleLarge}"
+                                           Foreground="{StaticResource Brush.OnSurfaceVariant}" />
+                                <Button Style="{StaticResource AppBarButton}" Content="New" Command="{Binding NewCommand}" ToolTip="Start an empty document (Ctrl+N)" />
+                                <Button Style="{StaticResource AppBarButton}" Content="Open..." Command="{Binding OpenDialogCommand}" ToolTip="Open an export file (Ctrl+O)" />
+                                <Button Style="{StaticResource AppBarButton}" Content="Export..." Command="{Binding SaveDialogCommand}" ToolTip="Write a file for the handheld (Ctrl+S)" />
+                                <Rectangle Width="1" Margin="12,4" Fill="{StaticResource Brush.Outline}" />
+                                <Button Style="{StaticResource AppBarButton}" Content="Import from handheld..." Command="{Binding ImportDialogCommand}" ToolTip="Merge a handheld export (Ctrl+I)" />
+                                <Rectangle Width="1" Margin="12,4" Fill="{StaticResource Brush.Outline}" />
+                                <Button Style="{StaticResource Material.TextButton}" Content="Start sharing" Command="{Binding StartSharingCommand}"
                                         ToolTip="Open the transfer hub so the handheld can reach this PC" />
-                                <Button Content="Stop sharing" Margin="6,0,0,0" Command="{Binding StopSharingCommand}"
+                                <Button Style="{StaticResource Material.TextButton}" Content="Stop sharing" Command="{Binding StopSharingCommand}"
                                         ToolTip="Close the transfer hub" />
-                                <Button Content="Send to handheld" Margin="12,0,0,0" Command="{Binding PushToHandheldCommand}"
+                                <Button Style="{StaticResource Material.TextButton}" Content="Send to handheld" Command="{Binding PushToHandheldCommand}"
                                         ToolTip="Make this document available for the handheld to pull (Ctrl+P)" />
-                                <Button Content="Pull from handheld" Margin="6,0,0,0" Command="{Binding ReceiveFromHandheldCommand}"
+                                <Button Style="{StaticResource Material.TextButton}" Content="Pull from handheld" Command="{Binding ReceiveFromHandheldCommand}"
                                         ToolTip="Staged when the handheld pushes to this PC - see the activity log" />
                             </StackPanel>
 
-                            <TextBlock Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
-                                       Style="{StaticResource DimText}" Text="{Binding SyncState}" />
+                            <Border Grid.Column="1" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                    Background="{StaticResource Brush.SurfaceContainerHigh}"
+                                    CornerRadius="{StaticResource Shape.Small}" Padding="10,4">
+                                <TextBlock Style="{StaticResource Type.LabelMedium}"
+                                           Foreground="{StaticResource Brush.OnSurfaceVariant}"
+                                           Text="{Binding SyncState}" />
+                            </Border>
                         </Grid>
                     </DockPanel>
                 </Border>
 
         <!-- Status bar -->
-        <Border DockPanel.Dock="Bottom" Background="{StaticResource PanelBrush}"
-                BorderBrush="{StaticResource BorderBrushSoft}" BorderThickness="0,1,0,0"
-                Padding="12,6">
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource Brush.SurfaceContainerLow}"
+                BorderBrush="{StaticResource Brush.OutlineVariant}" BorderThickness="0,1,0,0"
+                Padding="16,8">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding StatusMessage}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Grid.Column="0" Style="{StaticResource Type.BodyMedium}" Text="{Binding StatusMessage}" TextTrimming="CharacterEllipsis" />
                 <TextBlock Grid.Column="1" Style="{StaticResource DimText}" Text="{Binding DocumentSummary}" />
             </Grid>
         </Border>
@@ -93,190 +105,284 @@
                 <ColumnDefinition Width="400" MinWidth="320" />
             </Grid.ColumnDefinitions>
 
-            <!-- Splitters: opaque so they do not disappear into the dark chrome. -->
-            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
-                          Background="{StaticResource BorderBrushSoft}" />
-            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch"
-                          Background="{StaticResource BorderBrushSoft}" />
+            <!-- Splitters: tinted with the outline colour so they read as a deliberate divider
+                             rather than a gap in the layout. -->
+                        <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Stretch"
+                                      Background="{StaticResource Brush.OutlineVariant}" />
+                        <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Stretch"
+                                      Background="{StaticResource Brush.OutlineVariant}" />
 
-            <!-- Containers -->
-            <DockPanel Grid.Column="0" Margin="12">
-                <TextBlock DockPanel.Dock="Top" Style="{StaticResource HeadingText}" Text="Containers" />
-                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                    <Button Content="Add" Command="{Binding AddContainerCommand}" ToolTip="Add a container (Ctrl+D)" />
-                    <Button Content="Remove" Margin="6,0,0,0" Command="{Binding RemoveContainerCommand}"
-                            ToolTip="Remove the selected container" />
-                </StackPanel>
-                <ListBox x:Name="ContainerList"
-                         ItemsSource="{Binding Containers}"
-                         SelectedItem="{Binding SelectedContainer}"
-                         Background="{StaticResource ChromeBrush}"
-                         Foreground="{StaticResource TextBrush}"
-                         BorderBrush="{StaticResource BorderBrushSoft}">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Margin="4,6">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="{Binding Id}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Style="{StaticResource DimText}" TextTrimming="CharacterEllipsis">
+                        <!-- Containers -->
+                        <DockPanel Grid.Column="0" Margin="16,16,8,16">
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource PaneTitle}" Text="Containers" />
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button Content="Add" Style="{StaticResource Material.TonalButton}" Command="{Binding AddContainerCommand}" ToolTip="Add a container (Ctrl+D)" />
+                                <Button Content="Remove" Style="{StaticResource Material.TextButton}" Margin="8,0,0,0" Command="{Binding RemoveContainerCommand}"
+                                        ToolTip="Remove the selected container" />
+                            </StackPanel>
+
+                            <Grid>
+                                <ListBox x:Name="ContainerList"
+                                         ItemsSource="{Binding Containers}"
+                                         SelectedItem="{Binding SelectedContainer}"
+                                         Background="Transparent"
+                                         Foreground="{StaticResource Brush.OnSurface}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <!-- Tag reads as a chip, the same way the handheld's
+                                                         suggestion chip carries it. -->
+                                                    <Border Style="{StaticResource Material.Chip}"
+                                                            Background="{StaticResource Brush.SurfaceContainerHigh}">
+                                                        <TextBlock Style="{StaticResource Type.LabelLarge}"
+                                                                   FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   MaxWidth="120"
+                                                                   Text="{Binding Id}" />
+                                                    </Border>
+                                                    <TextBlock Text="{Binding Name}" Style="{StaticResource Type.BodyLarge}"
+                                                               FontWeight="SemiBold"
+                                                               TextTrimming="CharacterEllipsis" MaxWidth="160" />
+                                                </StackPanel>
+                                                <TextBlock Style="{StaticResource DimText}" TextTrimming="CharacterEllipsis" Margin="0,2,0,0">
+                                                    <TextBlock.Text>
+                                                        <MultiBinding StringFormat="{}{0} - {1}">
+                                                            <Binding Path="Name" />
+                                                            <Binding Path="Location" />
+                                                        </MultiBinding>
+                                                    </TextBlock.Text>
+                                                </TextBlock>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="6,0,0,0">
+                                                <!-- Always shown: a zero-unit container is a real state worth
+                                                     seeing, and the device shows this chip unconditionally too. -->
+                                                <Border Style="{StaticResource Material.AssistChip}">
+                                                    <TextBlock Style="{StaticResource Type.LabelSmall}"
+                                                               Foreground="{StaticResource Brush.OnSecondaryContainer}"
+                                                               Text="{Binding TotalQuantity, StringFormat='{}{0} units'}" />
+                                                </Border>
+                                                <Border Style="{StaticResource Material.WarningBadge}" Margin="4,0,0,0"
+                                                        Visibility="{Binding ItemsNeedingIdentity, Converter={StaticResource BoolToVisible}}">
+                                                    <TextBlock Foreground="{StaticResource Brush.OnTertiary}" FontWeight="Bold"
+                                                               TextAlignment="Center"
+                                                               Text="{Binding ItemsNeedingIdentity}" />
+                                                </Border>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                                <!-- Empty state, as on the device's container list. -->
+                                <StackPanel VerticalAlignment="Center" Margin="16"
+                                            Visibility="{Binding Containers, Converter={StaticResource EmptyToVisible}}">
+                                    <TextBlock Style="{StaticResource EmptyStateTitle}" Text="No containers found" />
+                                    <TextBlock Style="{StaticResource EmptyStateBody}" Margin="0,6,0,0"
+                                               Text="Open a handheld export, or press Ctrl+D to add the first container." />
+                                </StackPanel>
+                            </Grid>
+                        </DockPanel>
+
+            <!-- Items for the selected container -->
+                        <DockPanel Grid.Column="2" Margin="8,16,8,16">
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource PaneTitle}" Text="Items" />
+
+                            <!-- Container metadata editor: a secondary-container card, as on the
+                                 handheld's detail screen. Fields float their labels, so the pane labels
+                                 itself instead of needing a column header per box. -->
+                            <Border DockPanel.Dock="Top" Style="{StaticResource Material.SecondaryCard}"
+                                    Padding="16" Margin="0,0,0,12"
+                                    Visibility="{Binding SelectedContainer, Converter={StaticResource HasSelectionToVisible}}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="12" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Tag: the label doubles as the chip the list shows, so the two
+                                         panes use the same vocabulary for the same value. -->
+                                    <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource Material.Chip}"
+                                            Background="{StaticResource Brush.SurfaceContainerHigh}"
+                                            VerticalAlignment="Top" Margin="0,0,0,12" Padding="6,2">
+                                        <TextBlock Style="{StaticResource Type.LabelSmall}"
+                                                   Foreground="{StaticResource Brush.OnSurfaceVariant}"
+                                                   Text="{Binding SelectedContainer.Id, StringFormat='{}{0}', FallbackValue='Tag'}" />
+                                    </Border>
+
+                                    <TextBox Grid.Row="0" Grid.Column="2" Tag="Label"
+                                             Margin="0,0,0,12"
+                                             Text="{Binding SelectedContainer.Name, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <TextBox Grid.Row="1" Grid.Column="0" Tag="Barcode"
+                                             Margin="0,0,0,12"
+                                             Text="{Binding SelectedContainer.Barcode, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <TextBox Grid.Row="1" Grid.Column="2" Tag="Location"
+                                             Margin="0,0,0,12"
+                                             Text="{Binding SelectedContainer.Location, UpdateSourceTrigger=PropertyChanged}" />
+
+                                    <TextBox Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="3" Tag="Notes"
+                                             Text="{Binding SelectedContainer.Notes, UpdateSourceTrigger=PropertyChanged}" />
+                                </Grid>
+                            </Border>
+
+                            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,12,0,0">
+                                <!-- Extended FAB, mirroring the "Add Item" FAB on the handheld detail screen. -->
+                                <Button Style="{StaticResource Material.ExtendedFab}" Content="Add item"
+                                        Command="{Binding SelectedContainer.AddItemCommand}" />
+                                <Button Style="{StaticResource Material.TextButton}" Content="Remove item" Margin="8,0,0,0"
+                                        Command="{Binding SelectedContainer.RemoveItemCommand}"
+                                        CommandParameter="{Binding SelectedItem, ElementName=ItemGrid}" />
+                                <Border Style="{StaticResource Material.AssistChip}" Margin="12,0,0,0">
+                                    <TextBlock Style="{StaticResource Type.LabelMedium}"
+                                               Foreground="{StaticResource Brush.OnSecondaryContainer}"
+                                               Text="{Binding SelectedContainer.TotalQuantity, StringFormat='{}{0} units total'}" />
+                                </Border>
+                            </StackPanel>
+
+                            <Grid>
+                                <DataGrid x:Name="ItemGrid"
+                                          ItemsSource="{Binding SelectedContainerItems}"
+                                          CellEditEnding="OnItemCellEditEnding">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                                            Width="2*" MinWidth="140" />
+                                        <DataGridTextColumn Header="Barcode" Binding="{Binding Barcode, UpdateSourceTrigger=PropertyChanged}"
+                                                            Width="*" MinWidth="100" />
+                                        <!-- The Qty column is the quantity editor; MainWindow.xaml.cs recognises it by
+                                             this binding path. -->
+                                        <DataGridTextColumn Header="Qty" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus}"
+                                                            Width="70" />
+                                        <DataGridTextColumn Header="Category" Binding="{Binding Category, UpdateSourceTrigger=PropertyChanged}"
+                                                            Width="*" MinWidth="90" />
+                                        <DataGridTextColumn Header="Notes" Binding="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
+                                                            Width="2*" MinWidth="120" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+
+                                <!-- One empty state, two messages. Nothing selected and a selected-but-empty
+                                     container read very differently to an operator, and showing both at once
+                                     would be worse than showing either. -->
+                                <StackPanel VerticalAlignment="Center" Margin="24">
+                                                        <StackPanel.Visibility>
+                                                            <MultiBinding Converter="{StaticResource ItemPaneEmptyState}">
+                                            <Binding Path="SelectedContainer"
+                                                     RelativeSource="{RelativeSource AncestorType=Window}" />
+                                            <Binding Path="SelectedContainerItems"
+                                                     RelativeSource="{RelativeSource AncestorType=Window}" />
+                                                            </MultiBinding>
+                                                        </StackPanel.Visibility>
+                                    <TextBlock Style="{StaticResource EmptyStateTitle}">
                                         <TextBlock.Text>
-                                            <MultiBinding StringFormat="{}{0} - {1}">
-                                                <Binding Path="Name" />
-                                                <Binding Path="Location" />
+                                            <MultiBinding Converter="{StaticResource ItemPaneEmptyState}">
+                                                <Binding Path="SelectedContainer"
+                                                         RelativeSource="{RelativeSource AncestorType=Window}" />
+                                                <Binding Path="SelectedContainerItems"
+                                                         RelativeSource="{RelativeSource AncestorType=Window}" />
+                                            </MultiBinding>
+                                        </TextBlock.Text>
+                                    </TextBlock>
+                                    <TextBlock Style="{StaticResource EmptyStateBody}" Margin="0,6,0,0">
+                                        <TextBlock.Text>
+                                            <MultiBinding Converter="{StaticResource ItemPaneEmptyState}" ConverterParameter="Body">
+                                                <Binding Path="SelectedContainer"
+                                                         RelativeSource="{RelativeSource AncestorType=Window}" />
+                                                <Binding Path="SelectedContainerItems"
+                                                         RelativeSource="{RelativeSource AncestorType=Window}" />
                                             </MultiBinding>
                                         </TextBlock.Text>
                                     </TextBlock>
                                 </StackPanel>
-                                <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                    <Border Style="{StaticResource RoundBadge}" Background="{StaticResource PanelBrush}"
-                                            HorizontalAlignment="Right">
-                                        <TextBlock Style="{StaticResource DimText}"
-                                                   Text="{Binding TotalQuantity, StringFormat='x{0}'}" />
-                                    </Border>
-                                    <Border Style="{StaticResource RoundBadge}" Background="{StaticResource WarningBrush}"
-                                            Visibility="{Binding ItemsNeedingIdentity, Converter={StaticResource BoolToVisible}}">
-                                        <TextBlock Foreground="#FF201A0A" FontWeight="Bold"
-                                                   Text="{Binding ItemsNeedingIdentity}" />
-                                    </Border>
-                                </StackPanel>
                             </Grid>
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </DockPanel>
-
-            <!-- Items for the selected container -->
-            <DockPanel Grid.Column="2" Margin="0,12,12,12">
-                <TextBlock DockPanel.Dock="Top" Style="{StaticResource HeadingText}" Text="Items" />
-
-                <!-- Container metadata editor -->
-                <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}" CornerRadius="4"
-                        Padding="10" Margin="0,0,0,10"
-                        Visibility="{Binding SelectedContainer, Converter={StaticResource NullToVisible}}">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                        </Grid.RowDefinitions>
-
-                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Tag" Style="{StaticResource DimText}" Margin="0,0,8,6" />
-                        <TextBox   Grid.Row="0" Grid.Column="1" Margin="0,0,12,6"
-                                 Text="{Binding SelectedContainer.Id, UpdateSourceTrigger=PropertyChanged}" />
-                        <TextBlock Grid.Row="0" Grid.Column="2" Text="Label" Style="{StaticResource DimText}" Margin="0,0,8,6" />
-                        <TextBox   Grid.Row="0" Grid.Column="3" Margin="0,0,0,6"
-                                 Text="{Binding SelectedContainer.Name, UpdateSourceTrigger=PropertyChanged}" />
-
-                                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Barcode" Style="{StaticResource DimText}" Margin="0,0,8,0" />
-                        <TextBox   Grid.Row="1" Grid.Column="1" Margin="0,0,12,0"
-                                                         Text="{Binding SelectedContainer.Barcode, UpdateSourceTrigger=PropertyChanged}" />
-                                                <TextBlock Grid.Row="1" Grid.Column="2" Text="Location" Style="{StaticResource DimText}" Margin="0,0,8,0" />
-                                                <TextBox   Grid.Row="1" Grid.Column="3" Margin="0,0,0,0"
-                                                         Text="{Binding SelectedContainer.Location, UpdateSourceTrigger=PropertyChanged}" />
-                                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Notes" Style="{StaticResource DimText}" Margin="0,0,8,0" />
-                                                <TextBox   Grid.Row="2" Grid.Column="3"
-                                                         Text="{Binding SelectedContainer.Notes, UpdateSourceTrigger=PropertyChanged}" />
-                    </Grid>
-                </Border>
-
-                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,8,0,0">
-                    <Button Content="Add item" Command="{Binding SelectedContainer.AddItemCommand}" />
-                    <Button Content="Remove item" Margin="6,0,0,0"
-                            Command="{Binding SelectedContainer.RemoveItemCommand}"
-                            CommandParameter="{Binding SelectedItem, ElementName=ItemGrid}" />
-                    <Border Style="{StaticResource RoundBadge}" Background="{StaticResource PanelBrush}">
-                        <TextBlock Style="{StaticResource DimText}"
-                                   Text="{Binding SelectedContainer.TotalQuantity, StringFormat='{}{0} units total'}" />
-                    </Border>
-                </StackPanel>
-
-                <DataGrid x:Name="ItemGrid"
-                          ItemsSource="{Binding SelectedContainerItems}"
-                          CellEditEnding="OnItemCellEditEnding"
-                          Margin="0,0,0,0">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
-                                            Width="2*" MinWidth="140" />
-                        <DataGridTextColumn Header="Barcode" Binding="{Binding Barcode, UpdateSourceTrigger=PropertyChanged}"
-                                            Width="*" MinWidth="100" />
-                        <DataGridTextColumn Header="Qty" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus}"
-                                            Width="70" />
-                        <DataGridTextColumn Header="Category" Binding="{Binding Category, UpdateSourceTrigger=PropertyChanged}"
-                                            Width="*" MinWidth="90" />
-                        <DataGridTextColumn Header="Notes" Binding="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
-                                            Width="2*" MinWidth="120" />
-                    </DataGrid.Columns>
-                </DataGrid>
-            </DockPanel>
+                        </DockPanel>
 
             <!-- Merge review -->
-            <DockPanel Grid.Column="4" Margin="0,12,12,12">
-                <TextBlock DockPanel.Dock="Top" Style="{StaticResource HeadingText}" Text="Sync review" />
+                        <DockPanel Grid.Column="4" Margin="8,16,16,16">
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource PaneTitle}" Text="Sync review" />
 
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-                    <Button Content="Accept" Command="{Binding AcceptMergeCommand}" Style="{StaticResource PrimaryButton}"
-                            ToolTip="Apply every decision and export as the new baseline (Ctrl+Enter)" />
-                    <Button Content="Discard" Margin="6,0,0,0" Command="{Binding DiscardMergeCommand}" />
-                </StackPanel>
+                            <!-- Accept is the committing action for this pane, so it gets the filled
+                                 treatment; everything else here stays tonal or text. -->
+                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button Content="Accept" Style="{StaticResource Material.FilledButton}" Command="{Binding AcceptMergeCommand}"
+                                        ToolTip="Apply every decision and export as the new baseline (Ctrl+Enter)" />
+                                <Button Content="Discard" Style="{StaticResource Material.TextButton}" Margin="8,0,0,0" Command="{Binding DiscardMergeCommand}" />
+                            </StackPanel>
 
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button Content="All: desktop" Command="{Binding TakeAllLocalCommand}" MinWidth="96" />
-                    <Button Content="All: handheld" Margin="6,0,0,0" Command="{Binding TakeAllRemoteCommand}" MinWidth="100" />
-                </StackPanel>
+                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+                                <Button Content="All: desktop" Style="{StaticResource Material.TonalButton}" Command="{Binding TakeAllLocalCommand}" MinWidth="96" />
+                                <Button Content="All: handheld" Style="{StaticResource Material.TonalButton}" Margin="8,0,0,0" Command="{Binding TakeAllRemoteCommand}" MinWidth="100" />
+                            </StackPanel>
 
-                <TextBlock DockPanel.Dock="Top" Style="{StaticResource DimText}" Margin="0,0,0,8"
-                           Text="Every field both sides changed is listed here. Nothing is applied until you accept." />
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource DimText}" Margin="0,0,0,8"
+                                       TextWrapping="Wrap"
+                                       Text="Every field both sides changed is listed here. Nothing is applied until you accept." />
 
-                <DataGrid x:Name="ConflictGrid"
-                          ItemsSource="{Binding Conflicts}"
-                          SelectedItem="{Binding SelectedConflict}"
-                          MaxHeight="280" Margin="0,0,0,10">
-                    <DataGrid.Columns>
-                        <DataGridTextColumn Header="Container" Binding="{Binding ContainerId}" Width="*" MinWidth="80" IsReadOnly="True" />
-                        <DataGridTextColumn Header="Item" Binding="{Binding ItemName}" Width="*" MinWidth="90" IsReadOnly="True" />
-                        <DataGridTextColumn Header="Field" Binding="{Binding Field}" Width="*" MinWidth="70" IsReadOnly="True" />
-                        <DataGridTextColumn Header="Desktop" Binding="{Binding LocalValue}" Width="*" MinWidth="60" IsReadOnly="True" />
-                        <DataGridTextColumn Header="Handheld" Binding="{Binding RemoteValue}" Width="*" MinWidth="60" IsReadOnly="True" />
-                    </DataGrid.Columns>
-                </DataGrid>
+                            <!-- Conflicts, or an empty state explaining that a clean import is not a problem. -->
+                            <StackPanel DockPanel.Dock="Top">
+                                <DataGrid x:Name="ConflictGrid"
+                                          ItemsSource="{Binding Conflicts}"
+                                          SelectedItem="{Binding SelectedConflict}"
+                                          MaxHeight="280">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Header="Container" Binding="{Binding ContainerId}" Width="*" MinWidth="80" IsReadOnly="True" />
+                                        <DataGridTextColumn Header="Item" Binding="{Binding ItemName}" Width="*" MinWidth="90" IsReadOnly="True" />
+                                        <DataGridTextColumn Header="Field" Binding="{Binding Field}" Width="*" MinWidth="70" IsReadOnly="True" />
+                                        <DataGridTextColumn Header="Desktop" Binding="{Binding LocalValue}" Width="*" MinWidth="60" IsReadOnly="True" />
+                                        <DataGridTextColumn Header="Handheld" Binding="{Binding RemoteValue}" Width="*" MinWidth="60" IsReadOnly="True" />
+                                        <DataGridTextColumn Header="Status" Binding="{Binding StatusText}" Width="*" MinWidth="90" IsReadOnly="True" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
 
-                <!-- Per-conflict decision buttons, driven by the selection above. -->
-                <Border DockPanel.Dock="Top" Background="{StaticResource PanelBrush}" CornerRadius="4"
-                        Padding="10" Margin="0,0,0,10"
-                        Visibility="{Binding SelectedConflict, Converter={StaticResource NullToVisible}}">
-                    <StackPanel>
-                        <TextBlock Style="{StaticResource HeadingText}" Text="Selected conflict" Margin="0,0,0,6" />
-                        <TextBlock Style="{StaticResource DimText}" TextWrapping="Wrap" Margin="0,0,0,8"
-                                   Text="{Binding SelectedConflict.Summary}" />
-                        <StackPanel Orientation="Horizontal">
-                            <Button Content="Keep desktop" Command="{Binding KeepSelectedConflictCommand}" />
-                            <Button Content="Take handheld" Margin="6,0,0,0" Command="{Binding TakeSelectedConflictRemoteCommand}" />
-                        </StackPanel>
-                    </StackPanel>
-                </Border>
+                                <StackPanel Margin="8" VerticalAlignment="Center"
+                                            Visibility="{Binding Conflicts, Converter={StaticResource EmptyToVisible}}">
+                                    <TextBlock Style="{StaticResource EmptyStateTitle}" Text="No conflicts" />
+                                    <TextBlock Style="{StaticResource EmptyStateBody}" Margin="0,6,0,0"
+                                               Text="The handheld agreed with this PC on every field it changed." />
+                                </StackPanel>
+                            </StackPanel>
 
-                <TextBlock DockPanel.Dock="Top" Style="{StaticResource HeadingText}" Text="Activity" />
-                <ListBox ItemsSource="{Binding ActivityLog}"
-                         Background="{StaticResource ChromeBrush}"
-                         Foreground="{StaticResource TextDimBrush}"
-                         BorderBrush="{StaticResource BorderBrushSoft}"
-                         FontFamily="Consolas" FontSize="11">
-                    <ListBox.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="2,1" />
-                        </DataTemplate>
-                    </ListBox.ItemTemplate>
-                </ListBox>
-            </DockPanel>
+                            <!-- Per-conflict decision buttons, driven by the selection above. -->
+                            <Border DockPanel.Dock="Top" Style="{StaticResource Material.PrimaryCard}"
+                                    Padding="16" Margin="0,12,0,12"
+                                    Visibility="{Binding SelectedConflict, Converter={StaticResource HasSelectionToVisible}}">
+                                <StackPanel>
+                                    <TextBlock Style="{StaticResource Type.TitleSmall}" Text="Selected conflict" Margin="0,0,0,6" />
+                                    <TextBlock Style="{StaticResource Type.BodySmall}" TextWrapping="Wrap" Margin="0,0,0,12"
+                                               Foreground="{StaticResource Brush.OnPrimaryContainer}"
+                                               Text="{Binding SelectedConflict.Summary}" />
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button Content="Keep desktop" Style="{StaticResource Material.FilledButton}" Command="{Binding KeepSelectedConflictCommand}" />
+                                        <Button Content="Take handheld" Style="{StaticResource Material.TonalButton}" Margin="8,0,0,0" Command="{Binding TakeSelectedConflictRemoteCommand}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource PaneTitle}" Text="Activity" />
+                            <ListBox ItemsSource="{Binding ActivityLog}"
+                                     Background="Transparent"
+                                     Foreground="{StaticResource Brush.OnSurfaceVariant}"
+                                     FontFamily="{StaticResource Typeface}"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Style="{StaticResource Type.Mono}" Text="{Binding}"
+                                                   TextWrapping="Wrap" Margin="2,2" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
         </Grid>
     </DockPanel>
 </Window>

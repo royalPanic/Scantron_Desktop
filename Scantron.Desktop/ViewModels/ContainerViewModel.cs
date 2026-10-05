@@ -20,6 +20,7 @@ public sealed class ContainerViewModel : ObservableObject
     private string _location = "";
     private string _barcode = "";
     private string _notes = "";
+    private bool _isInitialized = false;
 
     public ContainerViewModel(Container? source = null)
     {
@@ -40,6 +41,8 @@ public sealed class ContainerViewModel : ObservableObject
 
         AddItemCommand = new RelayCommand(AddItem);
         RemoveItemCommand = new RelayCommand(RemoveItem, CanRemoveItem);
+
+        _isInitialized = true;
     }
 
     public long UpdatedAt { get; private set; }
@@ -126,6 +129,14 @@ public sealed class ContainerViewModel : ObservableObject
         get => _barcode;
         set
         {
+            // Barcode is only settable before the container is initialized.
+            // After initialization (i.e., after creating the container), the barcode
+            // becomes read-only to prevent accidental changes.
+            if (_isInitialized && !string.IsNullOrEmpty(_barcode))
+            {
+                return;
+            }
+
             if (SetProperty(ref _barcode, value ?? ""))
             {
                 Touch();
@@ -205,12 +216,12 @@ public sealed class ContainerViewModel : ObservableObject
             Id = Id.Trim(),
             Name = Name.Trim(),
             Location = Location.Trim(),
-                Barcode = Barcode,
-                Notes = Notes.Trim(),
-                UpdatedAt = UpdatedAt,
-                Items = Items.Select(i => i.ToItem()).ToList(),
-            };
-        }
+            Barcode = Barcode,
+            Notes = Notes.Trim(),
+            UpdatedAt = UpdatedAt,
+            Items = Items.Select(i => i.ToItem()).ToList(),
+        };
+    }
 
     public override string ToString() => string.IsNullOrWhiteSpace(_id) ? "(untagged)" : _id;
 }
