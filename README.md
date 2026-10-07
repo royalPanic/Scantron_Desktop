@@ -132,9 +132,11 @@ An HTTP endpoint on port **8756** that the handheld connects to:
 
 **The desktop hosts and the handheld connects.** A CK65 is battery-powered and cannot be relied on to
 hold a listening socket while docked or asleep, while the desk PC is on and already on the network.
-There is no discovery: the operator reads the IP address off the screen and types it into the
-handheld by hand, so that address gets a row of its own in the toolbar rather than being truncated
-beside the sync state.
+The address can be **found automatically**: while sharing is on the hub answers the handheld's UDP
+discovery probe (`WHO_HAS` on port 8757) with `SCANTRON_HUB/1 <name> <host> <port>`, so **Find
+desktops** on the scanner can fill the address in. It still gets a row of its own in the toolbar,
+because discovery depends on the AP passing client-to-client broadcast and typing the address by
+hand has to keep working regardless.
 
 ### Desktop → handheld (port 8758)
 
@@ -165,8 +167,9 @@ verbatim to the operator and an operator standing in an aisle can act on a sente
 JSON error envelope.
 
 The three fixed ports are distinct and none are operator-configurable: **8756** (desktop hub),
-**8757** (UDP discovery probe), **8758** (handheld listener). A second copy of either app holding
-the wrong port is a failure mode worth more than the flexibility.
+**8757** (UDP discovery probe — the desktop answers a `WHO_HAS` broadcast with
+`SCANTRON_HUB/1 <name> <host> <port>` while sharing is on), **8758** (handheld listener). A second
+copy of either app holding the wrong port is a failure mode worth more than the flexibility.
 
 Some deliberate choices worth knowing before modifying this code:
 

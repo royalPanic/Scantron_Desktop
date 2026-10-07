@@ -18,8 +18,6 @@ public sealed record Container
     /// <summary>Physical location, e.g. "Shelf 2-A".</summary>
     public string Location { get; init; } = "";
 
-    /// <summary>Barcode scanned for this container, if any.</summary>
-    public string? Barcode { get; init; }
 
     /// <summary>Free-form details.</summary>
     public string Notes { get; init; } = "";

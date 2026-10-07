@@ -243,9 +243,6 @@
                                              Margin="0,0,0,12"
                                              Text="{Binding SelectedContainer.Name, UpdateSourceTrigger=PropertyChanged}" />
 
-                                    <TextBox Grid.Row="1" Grid.Column="0" Tag="Barcode"
-                                             Margin="0,0,0,12"
-                                             Text="{Binding SelectedContainer.Barcode, UpdateSourceTrigger=PropertyChanged}" />
 
                                     <TextBox Grid.Row="1" Grid.Column="2" Tag="Location"
                                              Margin="0,0,0,12"
@@ -275,19 +272,17 @@
                                           ItemsSource="{Binding SelectedContainerItems}"
                                           CellEditEnding="OnItemCellEditEnding">
                                     <DataGrid.Columns>
-                                        <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
-                                                            Width="2*" MinWidth="140" />
-                                        <DataGridTextColumn Header="Barcode" Binding="{Binding Barcode, UpdateSourceTrigger=PropertyChanged}"
-                                                            Width="*" MinWidth="100" />
-                                        <!-- The Qty column is the quantity editor; MainWindow.xaml.cs recognises it by
-                                             this binding path. -->
-                                        <DataGridTextColumn Header="Qty" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus}"
-                                                            Width="70" />
-                                        <DataGridTextColumn Header="Category" Binding="{Binding Category, UpdateSourceTrigger=PropertyChanged}"
-                                                            Width="*" MinWidth="90" />
-                                        <DataGridTextColumn Header="Notes" Binding="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
-                                                            Width="2*" MinWidth="120" />
-                                    </DataGrid.Columns>
+                                                                            <DataGridTextColumn Header="Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                                                                                Width="2*" MinWidth="140" />
+                                                                            <!-- The Qty column is the quantity editor; MainWindow.xaml.cs recognises it by
+                                                                                 this binding path. -->
+                                                                            <DataGridTextColumn Header="Qty" Binding="{Binding Quantity, UpdateSourceTrigger=LostFocus}"
+                                                                                                Width="70" />
+                                                                            <DataGridTextColumn Header="Category" Binding="{Binding Category, UpdateSourceTrigger=PropertyChanged}"
+                                                                                                Width="*" MinWidth="90" />
+                                                                            <DataGridTextColumn Header="Notes" Binding="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
+                                                                                                Width="2*" MinWidth="120" />
+                                                                        </DataGrid.Columns>
                                 </DataGrid>
 
                                 <!-- One empty state, two messages. Nothing selected and a selected-but-empty

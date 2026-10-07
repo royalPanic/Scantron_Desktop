@@ -16,19 +16,16 @@ namespace Scantron.Desktop.ViewModels;
 public sealed class ContainerViewModel : ObservableObject
 {
     private string _id = "";
-    private string _name = "";
-    private string _location = "";
-    private string _barcode = "";
-    private string _notes = "";
-    private bool _isInitialized = false;
+        private string _name = "";
+        private string _location = "";
+        private string _notes = "";
 
-    public ContainerViewModel(Container? source = null)
-    {
-        _id = source?.Id ?? "";
-        _name = source?.Name ?? "";
-        _location = source?.Location ?? "";
-        _barcode = source?.Barcode ?? "";
-        _notes = source?.Notes ?? "";
+        public ContainerViewModel(Container? source = null)
+        {
+            _id = source?.Id ?? "";
+            _name = source?.Name ?? "";
+            _location = source?.Location ?? "";
+            _notes = source?.Notes ?? "";
         UpdatedAt = source?.UpdatedAt ?? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
         if (source is not null)
@@ -40,12 +37,10 @@ public sealed class ContainerViewModel : ObservableObject
         }
 
         AddItemCommand = new RelayCommand(AddItem);
-        RemoveItemCommand = new RelayCommand(RemoveItem, CanRemoveItem);
+                RemoveItemCommand = new RelayCommand(RemoveItem, CanRemoveItem);
+            }
 
-        _isInitialized = true;
-    }
-
-    public long UpdatedAt { get; private set; }
+            public long UpdatedAt { get; private set; }
 
     public ObservableCollection<ItemViewModel> Items { get; } = [];
 
@@ -123,26 +118,6 @@ public sealed class ContainerViewModel : ObservableObject
         }
     }
 
-    /// <summary>Barcode scanned for this container, if any.</summary>
-    public string Barcode
-    {
-        get => _barcode;
-        set
-        {
-            // Barcode is only settable before the container is initialized.
-            // After initialization (i.e., after creating the container), the barcode
-            // becomes read-only to prevent accidental changes.
-            if (_isInitialized && !string.IsNullOrEmpty(_barcode))
-            {
-                return;
-            }
-
-            if (SetProperty(ref _barcode, value ?? ""))
-            {
-                Touch();
-            }
-        }
-    }
 
     public string Notes
     {
@@ -202,26 +177,25 @@ public sealed class ContainerViewModel : ObservableObject
 
     /// <summary>Projects this view back to an immutable <see cref="Container"/>.</summary>
     public Container ToContainer()
-    {
-        // Every row is given an identity on the way out. Minting here rather than on edit means
-        // an untouched legacy row still leaves the desktop merge-safe instead of quietly
-        // matching another row by name.
-        foreach (var item in Items)
         {
-            item.EnsureIdentity();
-        }
+            // Every row is given an identity on the way out. Minting here rather than on edit means
+            // an untouched legacy row still leaves the desktop merge-safe instead of quietly
+            // matching another row by name.
+            foreach (var item in Items)
+            {
+                item.EnsureIdentity();
+            }
 
-        return new Container
-        {
-            Id = Id.Trim(),
-            Name = Name.Trim(),
-            Location = Location.Trim(),
-            Barcode = Barcode,
-            Notes = Notes.Trim(),
-            UpdatedAt = UpdatedAt,
-            Items = Items.Select(i => i.ToItem()).ToList(),
-        };
-    }
+            return new Container
+            {
+                Id = Id.Trim(),
+                Name = Name.Trim(),
+                Location = Location.Trim(),
+                Notes = Notes.Trim(),
+                UpdatedAt = UpdatedAt,
+                Items = Items.Select(i => i.ToItem()).ToList(),
+            };
+        }
 
     public override string ToString() => string.IsNullOrWhiteSpace(_id) ? "(untagged)" : _id;
 }

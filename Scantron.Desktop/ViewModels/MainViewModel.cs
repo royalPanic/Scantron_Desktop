@@ -36,6 +36,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         private readonly InboxStore _inbox;
         private readonly TransferHub _hub;
             private readonly HandheldClient _handheld;
+            private readonly DiscoveryResponder _discovery;
             private bool _disposed;
             private bool _served;
 
@@ -51,12 +52,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         private bool _isBusy;
     private bool _hasWorkingDocument;
 
-        public MainViewModel(WorkspaceStore? workspace = null, InboxStore? inbox = null, TransferHub? hub = null, HandheldClient? handheld = null)
+        public MainViewModel(WorkspaceStore? workspace = null, InboxStore? inbox = null, TransferHub? hub = null, HandheldClient? handheld = null, DiscoveryResponder? discovery = null)
         {
             _workspace = workspace ?? new WorkspaceStore();
             _inbox = inbox ?? new InboxStore();
             _hub = hub ?? new TransferHub();
                     _handheld = handheld ?? new HandheldClient();
+                    _discovery = discovery ?? new DiscoveryResponder();
 
             // The hub reports from its serve loop. Reflected onto the view model rather than bound
             // directly, because the toolbar has to be able to change the buttons the state implies -
@@ -165,9 +167,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         /// What the hub is doing, including the address to type into the handheld.
         /// </summary>
         /// <remarks>
-        /// This is the most important line on the toolbar. There is no discovery - the operator
-        /// reads the IP off the PC and enters it on the CK65 - so if this is wrong or vague, the
-        /// transfer simply cannot happen and there is nothing on screen to explain why.
+        /// This is the most important line on the toolbar. Discovery can fill the address in, but
+        /// only when the AP passes client-to-client broadcast, so this line has to stand on its own:
+        /// if it is wrong or vague the transfer simply cannot happen and there is nothing on screen
+        /// to explain why.
         /// </remarks>
         public string HubStatus => _hub.State.Status;
 
@@ -707,6 +710,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Started only after the hub is listening, so the address the reply advertises is one that
+        // actually works. Discovery is a convenience: a bind failure is logged and sharing goes on.
+        if (_discovery.Start() is { } discoveryError)
+        {
+            Log.Warning("Discovery is unavailable, so the address must be typed into the handheld: " + discoveryError);
+        }
+
         AppendActivity("Sharing with the handheld. Type the address above into the CK65's Transfer screen.");
     }
 
@@ -719,7 +729,11 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         /// returns. The one case that can take real time - a push mid-merge - is waited for by
         /// <see cref="DisposeAsync"/>, which runs at shutdown while the view model is still whole.
         /// </remarks>
-        private void StopSharingAsync() => _ = _hub.StopAsync();
+        private void StopSharingAsync()
+        {
+            _discovery.Stop();
+            _ = _hub.StopAsync();
+        }
 
     /// <summary>
         /// Sends the live document to a handheld that is listening for it.
@@ -896,6 +910,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 // The push client owns no socket of its own between sends, so this is about releasing the
                 // handler rather than tearing anything down that could fail.
                 _handheld.Dispose();
+                _discovery.Dispose();
     }
 
         /// <summary>
