@@ -1,9 +1,13 @@
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Globalization;
 using Scantron.Core.Models;
 using Scantron.Core.Merge;
+using Scantron.Core.Sync;
 using Scantron.Desktop.Mvvm;
 using Scantron.Desktop.Services;
+using Scantron.Desktop.Services.Sync;
 using Scantron.Desktop.Services.Transfer;
 
 namespace Scantron.Desktop.ViewModels;
@@ -37,8 +41,25 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         private readonly TransferHub _hub;
             private readonly HandheldClient _handheld;
             private readonly DiscoveryResponder _discovery;
+            private readonly PairedPeerStore _paired;
+            private readonly SyncCoordinator _sync;
+            private readonly ChangeEmitter _emitter;
             private bool _disposed;
             private bool _served;
+            private long _syncSeq;
+
+            /// <summary>
+            /// Set while a peer's batch is being adopted.
+            /// </summary>
+            /// <remarks>
+            /// Adopting the merged result rebuilds the grid, and a rebuild looks exactly like an operator
+            /// edit to the change emitter. Publishing during an apply would send the peer its own change
+            /// straight back - the classic sync loop, and precisely what the base diff exists to prevent.
+            /// </remarks>
+            private bool _suppressPublish;
+
+            /// <summary>True while the pane is showing a live-sync batch rather than a file merge.</summary>
+            private bool _liveMerge;
 
         private InventoryDocument? _document;
         private InventoryDocument? _mergeCandidate;
@@ -52,13 +73,28 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         private bool _isBusy;
     private bool _hasWorkingDocument;
 
-        public MainViewModel(WorkspaceStore? workspace = null, InboxStore? inbox = null, TransferHub? hub = null, HandheldClient? handheld = null, DiscoveryResponder? discovery = null)
+        public MainViewModel(WorkspaceStore? workspace = null, InboxStore? inbox = null, TransferHub? hub = null, HandheldClient? handheld = null, DiscoveryResponder? discovery = null, PairedPeerStore? paired = null, SyncCoordinator? coordinator = null)
         {
             _workspace = workspace ?? new WorkspaceStore();
             _inbox = inbox ?? new InboxStore();
             _hub = hub ?? new TransferHub();
                     _handheld = handheld ?? new HandheldClient();
                     _discovery = discovery ?? new DiscoveryResponder();
+            _paired = paired ?? new PairedPeerStore();
+            _sync = coordinator ?? new SyncCoordinator(_paired);
+
+            // The live-sync coordinator borrows the view model's documents rather than holding
+            // copies, so what it publishes is what the operator is actually looking at - the same
+            // reason the merge path rebuilds from the grid instead of using the last saved file.
+            _sync.Document = LiveDocument;
+            _sync.Base = () => _workspace.Base;
+            _sync.Applied = OnSyncApplied;
+            _sync.NextSeq = () => Interlocked.Increment(ref _syncSeq);
+            _sync.StateChanged += (_, _) => OnSyncStateChanged();
+
+            _emitter = new ChangeEmitter(
+                () => (LiveDocument(), _workspace.Base, Conflicts.Select(c => c.Source).ToList()),
+                ops => _sync.PublishAsync(ops, CancellationToken.None));
 
             // The hub reports from its serve loop. Reflected onto the view model rather than bound
             // directly, because the toolbar has to be able to change the buttons the state implies -
@@ -73,6 +109,19 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RemoveContainerCommand = new RelayCommand(RemoveContainer, () => SelectedContainer is not null);
         AcceptMergeCommand = new RelayCommand(AcceptMerge, () => CanAcceptMerge);
         DiscardMergeCommand = new RelayCommand(DiscardMerge, () => _mergeCandidate is not null);
+        CommitMergeCommand = new RelayCommand(
+            () =>
+            {
+                if (_liveMerge)
+                {
+                    ApplyLiveResolutions();
+                }
+                else
+                {
+                    AcceptMerge();
+                }
+            },
+            () => CanAcceptMerge);
         TakeAllLocalCommand = new RelayCommand(
             () => ResolveAll(ConflictResolution.KeepLocal), () => CanBulkResolve);
         TakeAllRemoteCommand = new RelayCommand(
@@ -87,6 +136,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                                 // and had nothing to wait for, which is exactly why it could not actually send.
                                 PushToHandheldCommand = new AsyncRelayCommand(PushToHandheld, () => CanPushToHandheld);
                                 ReceiveFromHandheldCommand = new RelayCommand(() => ShowHandheldTransfer(), () => CanReceiveFromHandheld);
+
+                                StartSyncingCommand = new RelayCommand(StartSyncing, () => CanSync);
+                                StopSyncingCommand = new RelayCommand(StopSyncing, () => _hub.State.Listening);
+                                UnpairCommand = new RelayCommand(Unpair, () => _paired.Peer.IsPaired);
 
         LoadWorkspace();
     }
@@ -247,12 +300,66 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             /// nothing still reported a successful transfer.
         /// </remarks>
         public bool HasServedToHandheld
-        {
-            get => _served;
-            private set => SetProperty(ref _served, value);
-        }
+            {
+                get => _served;
+                private set => SetProperty(ref _served, value);
+            }
 
-    // ---- commands -----------------------------------------------------------------------------------
+            // ---- live sync ----------------------------------------------------------------------------------
+
+            /// <summary>
+            /// True when the document on screen came from live sync rather than a file.
+            /// </summary>
+            /// <remarks>
+            /// The two merge paths differ only in how a conflict is settled. A file merge holds the
+            /// whole result for one Accept click, because the operator asked for a deliberate act. A
+            /// live batch cannot work that way - the ordinary case has no conflicts at all and has
+            /// already been applied - so its conflicts are settled in place instead, and this flag is
+            /// what tells the buttons which of the two they are looking at. The pane itself is
+            /// transitional and expected to be removed, so nothing here should grow beyond a switch.
+            /// </remarks>
+            public bool IsLiveMerge => _liveMerge;
+
+            /// <summary>Count of live-sync conflicts not yet decided. Drives the badge.</summary>
+            public int OpenConflictCount => Conflicts.Count(c => !c.IsResolved);
+
+            /// <summary>
+            /// Human-readable live-sync status, e.g. "In sync 14:02" or "Offline - retrying".
+            /// </summary>
+            /// <remarks>
+            /// Derived from the coordinator's connection state rather than stored, so the status line
+            /// can never disagree with the connection the buttons are acting on.
+            /// </remarks>
+            public string SyncStatus => _sync.State switch
+            {
+                SyncConnectionState.InSync => $"In sync {DateTime.Now:HH:mm} - {_sync.PeerName}",
+                SyncConnectionState.Syncing => $"Syncing with {_sync.PeerName}...",
+                SyncConnectionState.AwaitingPair => "Waiting for the pairing code.",
+                SyncConnectionState.Greeting => "A handheld is connecting...",
+                SyncConnectionState.Offline => $"Paired with {_sync.PeerName} - offline, retrying.",
+                _ => "Not paired.",
+            };
+
+            /// <summary>True while a paired handheld is connected and exchanging changes.</summary>
+            public bool IsSyncing => _sync.State is SyncConnectionState.Syncing or SyncConnectionState.InSync;
+
+            /// <summary>True when a handheld is paired, whether or not it is connected right now.</summary>
+            public bool IsPaired => _paired.Peer.IsPaired;
+
+            /// <summary>
+            /// The six digits the operator reads off this screen and types into the handheld.
+            /// </summary>
+            /// <remarks>
+            /// Shown whenever a handheld is already paired, so re-pairing a replacement unit does not
+            /// require a restart. It is deliberately not persisted - a code that outlives its pairing
+            /// is a standing key to the stock count.
+            /// </remarks>
+            public string PairingCode => _paired.Code;
+
+            /// <summary>Label for the conflict badge, empty when there is nothing to show.</summary>
+            public string ConflictBadge => OpenConflictCount == 0 ? "" : $"{OpenConflictCount}";
+
+        // ---- commands -----------------------------------------------------------------------------------
 
     public RelayCommand NewCommand { get; }
     public RelayCommand OpenDialogCommand { get; }
@@ -266,10 +373,29 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     public RelayCommand TakeAllRemoteCommand { get; }
     public RelayCommand KeepSelectedConflictCommand { get; }
     public RelayCommand TakeSelectedConflictRemoteCommand { get; }
+
+    /// <summary>
+    /// The pane's committing action. Accepts a file merge, or applies a live batch's resolutions.
+    /// </summary>
+    /// <remarks>
+    /// One command with two meanings because the operator is looking at one pane and one button. The
+    /// two paths really are different - a file merge holds the whole result, a live batch has already
+    /// been applied and only its decided fields remain - but that distinction belongs here, not in a
+    /// second button whose purpose has to be explained.
+    /// </remarks>
+    public RelayCommand CommitMergeCommand { get; }
         public RelayCommand StartSharingCommand { get; }
         public RelayCommand StopSharingCommand { get; }
                 public AsyncRelayCommand PushToHandheldCommand { get; }
         public RelayCommand ReceiveFromHandheldCommand { get; }
+
+        /// <summary>Starts live sync: opens the hub and begins accepting a paired handheld.</summary>
+        public RelayCommand StartSyncingCommand { get; }
+
+        public RelayCommand StopSyncingCommand { get; }
+
+        /// <summary>Forgets the paired handheld, so a different unit can pair.</summary>
+        public RelayCommand UnpairCommand { get; }
 
     /// <summary>
     /// Hook for the file pickers, injected so the view model stays free of WPF dialog types.
@@ -325,8 +451,18 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
     private bool CanMerge => _document is not null && !IsBusy;
 
-    private bool CanAcceptMerge =>
-        _pendingMerge is not null && !Conflicts.Any(c => !c.IsResolved) && !IsBusy;
+    /// <summary>
+    /// True when the pane's commit action can run.
+    /// </summary>
+    /// <remarks>
+    /// The two merge paths have different preconditions, and that is the whole difference between
+    /// them: a file merge is commit-able only while a preview is pending, whereas a live batch has
+    /// already been applied and is commit-able once its open conflicts have decisions (or there are
+    /// none at all).
+    /// </remarks>
+    private bool CanAcceptMerge => _liveMerge
+        ? !IsBusy && Conflicts.Count > 0 && !Conflicts.Any(c => !c.IsResolved)
+        : _pendingMerge is not null && !Conflicts.Any(c => !c.IsResolved) && !IsBusy;
 
         /// <summary>
         /// Sharing can always be started, even with nothing loaded.
@@ -538,6 +674,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
             _pendingMerge = result;
             _mergeCandidate = result.Document;
+
+            // Entering a manual merge makes the manual mode current, because only one of the two
+            // paths can be the one the pane is showing. Leaving the flag set from an earlier live
+            // batch is what made a clean manual merge uncommittable: the live guard wants conflicts
+            // to settle, and a clean merge has none, so the button stayed disabled with no way back.
+            _liveMerge = false;
+            OnPropertyChanged(nameof(IsLiveMerge));
+
             RebuildConflicts(result.Conflicts);
 
             SyncState = Conflicts.Count == 0
@@ -606,6 +750,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         _workspace.PromoteBase(document);
         Adopt(document);
+
+        // Published before the pane is cleared, because the decisions are read from it. The base was
+        // advanced first, so the emitter sees nothing outstanding and keeps the publish to exactly
+        // these decisions - the peer would otherwise stay frozen on the field for ever.
+        PublishResolutions();
+
         FinishMerge("Merged and applied. Export the file for the handheld.");
     }
 
@@ -644,7 +794,35 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RaiseGuards();
     }
 
-    /// <summary>Applies one decision to every open conflict at once.</summary>
+    /// <summary>
+    /// Sends the operator's decisions on the current conflicts to the handheld.
+    /// </summary>
+    /// <remarks>
+    /// A decision is not an edit, it is the settlement of one, so it travels as a
+    /// <see cref="ResolveOp"/> rather than as the row. That distinction is what stops the peer
+    /// re-reporting the same conflict: a row would look like a fresh simultaneous change, while a
+    /// resolution is understood as "this field is now this value, stop arguing about it".
+    /// </remarks>
+    private void PublishResolutions()
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var ops = new List<SyncOp>();
+
+        foreach (var conflict in Conflicts.Where(c => c.Resolution is not null))
+        {
+            var source = conflict.Source;
+            var value = conflict.Resolution == ConflictResolution.KeepLocal
+                ? source.LocalValue
+                : source.RemoteValue;
+
+            ops.Add(new ResolveOp(source.ContainerId, source.ItemUuid, source.Field, value, now));
+        }
+
+        if (ops.Count > 0)
+        {
+            _ = _sync.PublishAsync(ops, CancellationToken.None);
+        }
+    }
     public void ResolveAll(ConflictResolution resolution)
     {
         foreach (var conflict in Conflicts.Where(c => !c.IsResolved))
@@ -663,6 +841,10 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         // Accept becomes available and the bulk buttons retire; the guards are stale otherwise.
         RaiseGuards();
+
+        // A bulk decision on a live-sync conflict has to reach the handheld too, or the field stays
+        // frozen there for ever.
+        PublishResolutions();
     }
 
     private void RebuildConflicts(IReadOnlyList<ItemConflict> conflicts)
@@ -680,6 +862,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 if (args.PropertyName is nameof(ConflictViewModel.IsResolved))
                 {
                     SyncState = $"{Conflicts.Count(c => !c.IsResolved)} unresolved of {Conflicts.Count}";
+                    OnPropertyChanged(nameof(OpenConflictCount));
+                    OnPropertyChanged(nameof(ConflictBadge));
+
+                    // Rows are now unblocked (or blocked), so what is outstanding has to be
+                    // re-evaluated rather than waiting for the next unrelated edit.
+                    _emitter.PublishSoon();
                     RaiseGuards();
                 }
             };
@@ -701,7 +889,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     /// </remarks>
     private void StartSharing()
     {
-        _hub.Start(LiveDocument, ReceiveFromNetwork);
+        _hub.Start(LiveDocument, ReceiveFromNetwork, _sync);
 
         if (_hub.State.Error is { } error)
         {
@@ -873,6 +1061,297 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         RaiseGuards();
     }
 
+    // ---- live sync ------------------------------------------------------------------------------------
+
+    private bool CanSync => !IsBusy && !_hub.State.Listening;
+
+    /// <summary>
+    /// Opens the hub and offers live sync, showing the pairing code.
+    /// </summary>
+    /// <remarks>
+    /// Live sync and the manual transfer routes share one hub on one port, so "sync" is the same
+    /// switch as "share" plus the pairing code. That is deliberate: an operator should not have to
+    /// reason about which of two listening modes is on.
+    /// </remarks>
+    private void StartSyncing()
+    {
+        StartSharing();
+
+        if (_hub.State.Error is { } error)
+        {
+            StatusMessage = $"Could not start live sync: {error}";
+            AppendActivity(StatusMessage);
+            return;
+        }
+
+        StatusMessage = _paired.Peer.IsPaired
+            ? $"Live sync open. {_paired.Peer.Name} reconnects on its own; no code needed."
+            : $"Live sync open. Type the pairing code {_paired.Code} into the handheld.";
+
+        AppendActivity(StatusMessage);
+        OnPropertyChanged(nameof(PairingCode));
+        RaiseGuards();
+    }
+
+    private void StopSyncing()
+    {
+        StopSharingAsync();
+        AppendActivity("Live sync closed.");
+    }
+
+    private void Unpair()
+    {
+        var name = _paired.Peer.Name;
+        _sync.Unpair();
+
+        StatusMessage = $"Unpaired from {name}. A new handheld can pair with the code shown.";
+        AppendActivity($"Unpaired from {name}.");
+        RaiseGuards();
+    }
+
+    private void OnSyncStateChanged()
+    {
+        OnPropertyChanged(nameof(SyncStatus));
+        OnPropertyChanged(nameof(IsSyncing));
+        OnPropertyChanged(nameof(IsPaired));
+        OnPropertyChanged(nameof(PairingCode));
+        RaiseGuards();
+    }
+
+    /// <summary>
+    /// Applies a batch of live-sync changes to the grid and persists the new base.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is where live sync stops being "review and accept" and becomes actual sync. A batch with
+    /// no conflicts is adopted immediately - the operator is not asked to approve a change that
+    /// cannot lose anyone's work - while a real conflict lands in the review pane and raises the
+    /// badge. That pane is transitional and is expected to disappear; the conflict state itself is
+    /// modelled in the documents, not in the pane, so removing it later is a UI-only change.
+    /// </para>
+    /// <para>
+    /// The base is advanced for everything both devices agreed on and deliberately left alone for a
+    /// conflicted field. Advancing past a conflict is what would silently pick a winner.
+    /// </para>
+    /// </remarks>
+    private void OnSyncApplied(SyncApplyResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+
+        // The grid is the authority, so what it holds now is folded in before the peer's view is
+        // applied - exactly as the file-merge path rebuilds before merging.
+        var local = BuildDocument();
+        _document = local;
+        _hasWorkingDocument = true;
+
+        _workspace.SetDocuments(result.Document, result.Base);
+
+        _suppressPublish = true;
+        try
+        {
+            Adopt(result.Document);
+        }
+        finally
+        {
+            _suppressPublish = false;
+        }
+
+        _document = result.Document;
+
+        // A manual merge preview was computed against the state *before* this batch, so keeping it
+        // would let the operator later accept a document that has already been superseded - silently
+        // reverting the very change that just arrived. It is dropped rather than kept, and the
+        // operator is told below, because a review pane that empties itself without a word is its
+        // own small data loss: they cannot tell whether they missed something or nothing happened.
+        var supersededMerge = _pendingMerge is not null;
+
+        _pendingMerge = null;
+        _mergeCandidate = null;
+        _liveMerge = true;
+        Conflicts.Clear();
+        RebuildConflicts(result.Conflicts);
+
+        SyncState = result.Conflicts.Count == 0
+            ? "In sync"
+            : $"{result.Conflicts.Count} field(s) need a decision";
+
+        if (result.Conflicts.Count > 0)
+        {
+            StatusMessage = $"{result.Conflicts.Count} field(s) changed on both devices. Choose a value to settle each one.";
+            AppendActivity(StatusMessage);
+        }
+
+        if (supersededMerge)
+        {
+            const string superseded =
+                "The merge you had open was set aside: the handheld's change was applied on top of it, " +
+                "so reviewing it would have reverted that change. Import the file again if you still need it.";
+
+            StatusMessage = result.Conflicts.Count > 0
+                ? StatusMessage + " " + superseded
+                : superseded;
+
+            AppendActivity("A pending merge preview was superseded by a live-sync batch and discarded.");
+        }
+
+        if (result.ClockSkewDetected)
+        {
+            AppendActivity("Clock skew detected between the desktop and the handheld; recency is unreliable.");
+        }
+
+        // Persisted only after the documents are in place: a base written before the document it
+        // belongs to would be a snapshot of a state the operator never saw.
+        var saveError = _workspace.Save();
+        if (saveError is not null)
+        {
+            StatusMessage = saveError;
+            AppendActivity(saveError);
+        }
+
+        OnPropertyChanged(nameof(DocumentSummary));
+        OnPropertyChanged(nameof(SelectedContainerItems));
+        OnPropertyChanged(nameof(SyncStatus));
+        OnPropertyChanged(nameof(IsLiveMerge));
+        RaiseGuards();
+
+        // Only a live batch needs an explicit action: a clean one has already been applied, and a
+        // conflicted one is settled with "Apply resolutions" rather than being held for Accept.
+        if (result.Conflicts.Count > 0)
+        {
+            StatusMessage = $"{result.Conflicts.Count} field(s) changed on both devices. " +
+                            "Choose a value for each, then apply the resolutions.";
+        }
+
+        // Deliberately not RaiseDocumentChanged: that would rebuild the document from the grid and
+        // push the freshly applied values straight back out as local edits, which is the echo the
+        // base diff exists to prevent.
+    }
+
+    /// <summary>
+    /// Settles the live-sync conflicts the operator has decided, in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The counterpart of <see cref="AcceptMerge"/> for the live path. A file merge can hold the
+    /// whole result for one Accept click because the operator asked for a deliberate act; a live
+    /// batch cannot, because the ordinary case has no conflicts at all and has already been applied.
+    /// So there is nothing to promote here - only the decided fields have to be written and the new
+    /// agreed base advanced past them, which is what unfreezes the rows.
+    /// </para>
+    /// <para>
+    /// Only the decided fields move. A conflict the operator has not answered keeps its base entry
+    /// exactly where it was, so it stays reported rather than being quietly settled by default.
+    /// </para>
+    /// </remarks>
+    public void ApplyLiveResolutions()
+    {
+        if (!_liveMerge)
+        {
+            // A file merge is committed by AcceptMerge; sending it here would skip that step.
+            StatusMessage = "Use Accept to apply a merge from a file.";
+            return;
+        }
+
+        if (Conflicts.Count == 0)
+        {
+            StatusMessage = "There is nothing to resolve.";
+            return;
+        }
+
+        if (Conflicts.Any(c => !c.IsResolved))
+        {
+            StatusMessage = "Resolve every conflict before applying.";
+            return;
+        }
+
+        var document = _document ?? BuildDocument();
+        var nextBase = _workspace.Base ?? document;
+
+        foreach (var conflict in Conflicts)
+        {
+            var source = conflict.Source;
+            var value = conflict.Resolution == ConflictResolution.KeepLocal
+                ? source.LocalValue
+                : source.RemoteValue;
+
+            document = ApplyFieldToDocument(document, source, value);
+            nextBase = ApplyFieldToDocument(nextBase, source, value);
+        }
+
+        _workspace.SetDocuments(document, nextBase);
+
+        // The decisions go to the handheld before the pane is cleared, because the peer needs to
+        // learn the field is settled - otherwise it would stay frozen there for ever.
+        PublishResolutions();
+
+        _suppressPublish = true;
+        try
+        {
+            Adopt(document);
+        }
+        finally
+        {
+            _suppressPublish = false;
+        }
+
+        _document = document;
+        _liveMerge = false;
+        Conflicts.Clear();
+
+        var saveError = _workspace.Save();
+        if (saveError is not null)
+        {
+            StatusMessage = saveError;
+            AppendActivity(saveError);
+        }
+        else
+        {
+            StatusMessage = "Resolutions applied and synced to the handheld.";
+            AppendActivity(StatusMessage);
+        }
+
+        OnPropertyChanged(nameof(IsLiveMerge));
+        OnPropertyChanged(nameof(DocumentSummary));
+        OnPropertyChanged(nameof(SelectedContainerItems));
+        RaiseGuards();
+    }
+
+    /// <summary>
+    /// Applies one decided field to a document, by uuid for a row and by tag for a container.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately mirrors what the peer does with a <see cref="ResolveOp"/>. Both sides reaching
+    /// the same value by the same rule is what makes the two devices agree without a round trip.
+    /// </remarks>
+    private static InventoryDocument ApplyFieldToDocument(
+        InventoryDocument document,
+        ItemConflict conflict,
+        string? value)
+    {
+        if (string.IsNullOrWhiteSpace(conflict.ItemUuid))
+        {
+            return SyncDocuments.SetContainerField(document, conflict.ContainerId, conflict.Field, value);
+        }
+
+        var container = document.Containers.FirstOrDefault(
+            c => string.Equals(c.Id.Trim(), conflict.ContainerId.Trim(), StringComparison.Ordinal));
+
+        var row = container?.Items.FirstOrDefault(
+            i => string.Equals(i.Uuid.Trim(), conflict.ItemUuid.Trim(), StringComparison.Ordinal));
+
+        if (row is null)
+        {
+            return document;
+        }
+
+        return SyncDocuments.SetItemField(
+            document,
+            conflict.ContainerId,
+            Scantron.Core.Identity.ItemKeyResolver.Resolve(conflict.ContainerId, row),
+            conflict.Field,
+            value);
+    }
+
     // ---- document plumbing --------------------------------------------------------------------------
 
     /// <summary>
@@ -911,6 +1390,8 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 // handler rather than tearing anything down that could fail.
                 _handheld.Dispose();
                 _discovery.Dispose();
+                _emitter.Dispose();
+                await _sync.DisposeAsync().ConfigureAwait(true);
     }
 
         /// <summary>
@@ -931,6 +1412,59 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         /// <summary>Publishes the live document to a listening handheld. Internal for the same reason.</summary>
                 internal Task SendToHandheld() => PushToHandheld();
 
+    /// <summary>
+    /// Starts listening to a container and its rows, so an edit reaches the handheld.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The document is only rebuilt from the grid when it is read, so nothing else in the app needs
+    /// to know the moment a field changes. Live sync is the exception: without this, typing a
+    /// quantity would not be noticed until something else happened to trigger a read, and the
+    /// handheld would sit on a stale value until the next structural change.
+    /// </para>
+    /// <para>
+    /// This is not a per-change publish - it only asks the emitter to look once the typing stops,
+    /// which is why hooking every property is cheap enough to do unconditionally.
+    /// </para>
+    /// </remarks>
+    private void Watch(ContainerViewModel container)
+    {
+        container.PropertyChanged += OnEditorChanged;
+        container.Items.CollectionChanged += OnRowsChanged;
+
+        foreach (var item in container.Items)
+        {
+            item.PropertyChanged += OnEditorChanged;
+        }
+    }
+
+    private void OnRowsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        // Rows are hooked as they arrive and released as they leave, so a removed row cannot keep
+        // the emitter alive or report edits it no longer has.
+        foreach (var item in e.OldItems?.Cast<ItemViewModel>() ?? [])
+        {
+            item.PropertyChanged -= OnEditorChanged;
+        }
+
+        foreach (var item in e.NewItems?.Cast<ItemViewModel>() ?? [])
+        {
+            item.PropertyChanged += OnEditorChanged;
+        }
+
+        _emitter.PublishSoon();
+    }
+
+    private void OnEditorChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // An apply rebuilds the grid, and a rebuild looks like an edit. Publishing then would send
+        // the peer its own change straight back.
+        if (!_suppressPublish)
+        {
+            _emitter.PublishSoon();
+        }
+    }
+
     /// <summary>Rebuilds the editable view from an immutable document.</summary>
     private void Adopt(InventoryDocument document)
     {
@@ -948,7 +1482,9 @@ public sealed class MainViewModel : ObservableObject, IDisposable
 
         foreach (var container in document.Containers)
         {
-            Containers.Add(new ContainerViewModel(container));
+            var view = new ContainerViewModel(container);
+            Watch(view);
+            Containers.Add(view);
         }
 
         // Selection survives a reload when the same container is still present, so accepting a
@@ -996,6 +1532,14 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(DocumentSummary));
         OnPropertyChanged(nameof(SelectedContainerItems));
         RaiseGuards();
+
+        // Asking the emitter is cheap and safe on every structural change; it only does work once
+        // the operator has stopped typing. A structural change is also the moment the operator is
+        // most likely to look away, so it must not be the one that never gets sent.
+        if (!_suppressPublish)
+        {
+            _emitter.PublishSoon();
+        }
     }
 
     private void RaiseGuards()
@@ -1003,6 +1547,7 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         SaveDialogCommand.RaiseCanExecuteChanged();
         ImportDialogCommand.RaiseCanExecuteChanged();
         AcceptMergeCommand.RaiseCanExecuteChanged();
+        CommitMergeCommand.RaiseCanExecuteChanged();
         DiscardMergeCommand.RaiseCanExecuteChanged();
         TakeAllLocalCommand.RaiseCanExecuteChanged();
         TakeAllRemoteCommand.RaiseCanExecuteChanged();
@@ -1012,8 +1557,13 @@ public sealed class MainViewModel : ObservableObject, IDisposable
                 StopSharingCommand.RaiseCanExecuteChanged();
                 PushToHandheldCommand.RaiseCanExecuteChanged();
                 ReceiveFromHandheldCommand.RaiseCanExecuteChanged();
+        StartSyncingCommand.RaiseCanExecuteChanged();
+        StopSyncingCommand.RaiseCanExecuteChanged();
+        UnpairCommand.RaiseCanExecuteChanged();
                 OnPropertyChanged(nameof(DocumentSummary));
                 OnPropertyChanged(nameof(SyncState));
+        OnPropertyChanged(nameof(OpenConflictCount));
+        OnPropertyChanged(nameof(ConflictBadge));
     }
 
     private void AppendActivity(string message)

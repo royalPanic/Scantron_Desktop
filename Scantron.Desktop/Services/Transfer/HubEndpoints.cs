@@ -125,6 +125,14 @@ public static class HubEndpoints
                     case "/PUSH" when Is(method, "POST"):
                         return Push(body, onPush);
 
+                    // The live-sync route. Reaching it as a plain request means the client asked for
+                    // the path without asking to upgrade, which is a mistake worth naming rather
+                    // than answering 404 - the route exists, the request was just not the right shape.
+                    case "/SYNC":
+                        return TextResponse(
+                            426,
+                            "Live sync needs a WebSocket. Connect to this address with an 'Upgrade: websocket' request.");
+
                     // A known route reached with the wrong verb is a mistake worth naming, and 405 says
                     // so without the client having to work out which of the three routes it hit.
                     case "/HEALTH" or "/PULL" or "/PUSH":

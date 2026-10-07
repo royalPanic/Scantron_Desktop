@@ -375,7 +375,7 @@ public static class InventoryMerger
     /// wins and the situation is reported. That is the safe direction for a desktop tool: it
     /// is the side the operator is looking at.
     /// </remarks>
-    private static int MergeField(
+    internal static int MergeField(
         string containerId,
         string itemUuid,
         string field,
@@ -420,7 +420,7 @@ public static class InventoryMerger
             return local;
         }
 
-        private static string MergeField(
+        internal static string MergeField(
             string containerId,
             string itemUuid,
             string field,
@@ -469,7 +469,7 @@ public static class InventoryMerger
     /// A merge that emitted the older <c>updatedAt</c> would lose the same argument again on
     /// the next sync, so the result is always at least "now".
     /// </remarks>
-    private static Item Stamp(Item item, long newestInput, DateTimeOffset localNow) =>
+    internal static Item Stamp(Item item, long newestInput, DateTimeOffset localNow) =>
         item with { UpdatedAt = Math.Max(item.UpdatedAt, Math.Max(newestInput, localNow.ToUnixTimeMilliseconds())) };
 
     private static bool DetectClockSkew(
@@ -497,7 +497,7 @@ public static class InventoryMerger
         : !string.IsNullOrWhiteSpace(b) ? b.Trim()
         : null;
 
-    private static string? Describe<T>(T value) =>
+    internal static string? Describe<T>(T value) =>
         value switch
         {
             null => null,

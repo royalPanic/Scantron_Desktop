@@ -19,6 +19,7 @@
                 <Views:BoolToVisibleConverter x:Key="BoolToVisible" />
                 <Views:HasSelectionToVisibleConverter x:Key="HasSelectionToVisible" />
                 <Views:EmptyToVisibleConverter x:Key="EmptyToVisible" />
+                <Views:CountToVisibleConverter x:Key="CountToVisible" />
             <Views:ItemPaneEmptyStateConverter x:Key="ItemPaneEmptyState" />
 
                 <!-- Pane headings. Shared by all three columns so they stay in step. -->

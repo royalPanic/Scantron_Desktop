@@ -1,7 +1,9 @@
 using Scantron.Core.Models;
 using Scantron.Core.Serialization;
+using Scantron.Core.Sync;
 using Scantron.Desktop.Mvvm;
 using Scantron.Desktop.Services;
+using Scantron.Desktop.Services.Sync;
 using Scantron.Desktop.Services.Transfer;
 using Scantron.Desktop.ViewModels;
 using Xunit;
@@ -74,6 +76,149 @@ public sealed class MainViewModelTransferTests : IDisposable
         File.WriteAllText(path, InventoryReader.Write(document));
         vm.LoadFrom(new Uri(path));
     }
+
+    [Fact]
+    public void A_clean_manual_merge_after_a_live_batch_is_still_committable()
+    {
+        // The regression this pins: a live batch puts the pane into live mode, and a live batch is
+        // committed by settling conflicts rather than by Accept. If entering a manual merge did not
+        // clear that mode, the manual merge would be judged by the live guard - which needs at least
+        // one conflict to settle, and a clean merge has none - so Accept would stay disabled and the
+        // import could never be finished.
+        var paired = new PairedPeerStore(_directory);
+        var coordinator = new SyncCoordinator(paired, "DESK-01");
+        var vm = new MainViewModel(
+            new WorkspaceStore(_directory), new InboxStore(_directory), new TransferHub(UnusedPort),
+            paired: paired, coordinator: coordinator);
+
+        var baseline = Doc();
+        Load(vm, baseline);
+
+        // The operator raises the quantity, then a live batch changes the same field to something
+        // else. That is a real conflict, so the pane is left in live mode with work outstanding.
+        vm.Containers.Single().Items.Single().Quantity = 7;
+        coordinator.Applied!(SyncApply.Apply(
+            baseline, vm.LiveDocument()!, [new UpsertItemOp("BOX-101", Item(quantity: 9))], DateTimeOffset.Now));
+
+        Assert.True(vm.IsLiveMerge);
+        Assert.Equal(1, vm.OpenConflictCount);
+
+        // The operator then imports a file containing an extra container. Nothing in it conflicts,
+        // so this is the case that used to be uncommittable.
+        var cleanFile = Path.Combine(_directory, "clean.json");
+        File.WriteAllText(cleanFile, InventoryReader.Write(new InventoryDocument
+        {
+            Containers =
+            [
+                new Container
+                {
+                    Id = "BOX-101",
+                    Name = "Shelf stock",
+                    UpdatedAt = 1_700_000_000_000,
+                    Items = [new Item { Uuid = "u1", Name = "Drill", Quantity = 4, UpdatedAt = 1_700_000_000_000 }],
+                },
+                new Container
+                {
+                    Id = "BOX-202",
+                    Name = "Overflow",
+                    UpdatedAt = 1_700_000_900_000,
+                    Items = [new Item { Uuid = "u2", Name = "Tape", Quantity = 1, UpdatedAt = 1_700_000_900_000 }],
+                },
+            ],
+        }));
+        vm.MergeFrom(new Uri(cleanFile));
+
+        // The pane is now showing the manual merge: its (empty) conflict list, and it is committable.
+        Assert.False(vm.IsLiveMerge);
+        Assert.Empty(vm.Conflicts);
+        Assert.True(vm.CommitMergeCommand.CanExecute(null));
+
+        vm.CommitMergeCommand.Execute(null);
+
+        // Committed as a file merge, and the file's new container actually landed.
+        Assert.Contains(vm.Containers, c => c.Id == "BOX-202");
+        Assert.Contains("Merged and applied", vm.StatusMessage, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_conflicted_manual_merge_after_a_live_batch_shows_the_manual_conflicts()
+    {
+        // The mode has to switch for the conflicted case too: the operator must be resolving the
+        // conflicts of the merge they just started, not the leftovers of the live batch.
+        var paired = new PairedPeerStore(_directory);
+        var coordinator = new SyncCoordinator(paired, "DESK-01");
+        var vm = new MainViewModel(
+            new WorkspaceStore(_directory), new InboxStore(_directory), new TransferHub(UnusedPort),
+            paired: paired, coordinator: coordinator);
+
+        var baseline = Doc();
+        Load(vm, baseline);
+
+        coordinator.Applied!(SyncApply.Apply(
+            baseline, Doc(quantity: 7), [new UpsertItemOp("BOX-101", Item(quantity: 9))], DateTimeOffset.Now));
+
+        Assert.Equal(1, vm.OpenConflictCount);
+
+        // A file the handheld produced from the original baseline, with its own differing quantity:
+        // a genuine conflict against what is now on screen.
+        var conflictingFile = Path.Combine(_directory, "conflict.json");
+        File.WriteAllText(conflictingFile, InventoryReader.Write(Doc(quantity: 11)));
+        vm.MergeFrom(new Uri(conflictingFile));
+
+        Assert.False(vm.IsLiveMerge);
+        Assert.Single(vm.Conflicts);
+
+        // Not committable until the operator decides - and then it is.
+        vm.Conflicts.Single().KeepLocal();
+        Assert.True(vm.CommitMergeCommand.CanExecute(null));
+
+        vm.CommitMergeCommand.Execute(null);
+
+        Assert.Equal(7, vm.Containers.Single().Items.Single().Quantity);
+    }
+
+    [Fact]
+    public void A_live_batch_sets_aside_a_pending_manual_merge_and_says_so()
+    {
+        // A pending preview was computed against the state before the batch, so keeping it would let
+        // the operator later accept a document that reverts the change that just arrived. It is
+        // dropped - but silently dropping it would leave the pane empty with no explanation, which
+        // is its own small data loss.
+        var paired = new PairedPeerStore(_directory);
+        var coordinator = new SyncCoordinator(paired, "DESK-01");
+        var vm = new MainViewModel(
+            new WorkspaceStore(_directory), new InboxStore(_directory), new TransferHub(UnusedPort),
+            paired: paired, coordinator: coordinator);
+
+        var baseline = Doc();
+        Load(vm, baseline);
+
+        // A manual merge is left open, unaccepted.
+        var openFile = Path.Combine(_directory, "open.json");
+        File.WriteAllText(openFile, InventoryReader.Write(Doc(quantity: 6)));
+        vm.MergeFrom(new Uri(openFile));
+        Assert.False(vm.IsLiveMerge);
+
+        // Then a live batch lands on top of it.
+        coordinator.Applied!(SyncApply.Apply(
+            baseline, vm.LiveDocument()!, [new UpsertItemOp("BOX-101", Item(quantity: 9))], DateTimeOffset.Now));
+
+        Assert.True(vm.IsLiveMerge);
+        Assert.Empty(vm.Conflicts);
+
+        // The superseded preview is gone, so there is nothing stale left to accept...
+        Assert.False(vm.DiscardMergeCommand.CanExecute(null));
+
+        // ...the peer's value is what stuck, not the abandoned preview's...
+        Assert.Equal(9, vm.Containers.Single().Items.Single().Quantity);
+
+        // ...and the operator is told, rather than watching the pane empty itself unexplained.
+        Assert.Contains("set aside", vm.StatusMessage, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(vm.ActivityLog, line => line.Contains("superseded", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static Item Item(int quantity = 1) =>
+        new() { Uuid = "u1", Name = "Drill", Quantity = quantity, UpdatedAt = 1_700_000_600_000 };
 
     [Fact]
     public void An_inbound_push_and_a_file_import_produce_the_same_merged_document()

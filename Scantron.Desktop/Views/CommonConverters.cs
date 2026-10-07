@@ -38,6 +38,22 @@ public sealed class HasSelectionToVisibleConverter : IValueConverter
         throw new NotSupportedException("Visibility cannot be converted back to a selection");
 }
 
+/// <summary>Shows an element only when a count is greater than zero.</summary>
+/// <remarks>
+/// Separate from <see cref="BoolToVisibleConverter"/> because the value being bound is an
+/// <see cref="int"/>, and WPF will not feed that through a converter that only understands
+/// <c>bool</c>. Used for the conflict badge, which is visible exactly while something is
+/// outstanding and hidden the rest of the time.
+/// </remarks>
+public sealed class CountToVisibleConverter : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        value is int count && count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+        throw new NotSupportedException("Visibility cannot be converted back to a count");
+}
+
 /// <summary>Shows an element only when the bound collection has nothing in it.</summary>
 /// <remarks>
 /// Drives the empty states - "No containers found", "This container is empty" - that the

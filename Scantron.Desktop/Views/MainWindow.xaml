@@ -34,6 +34,31 @@
                         Padding="16,8">
                     <DockPanel>
 
+                        <!-- Live sync.
+                             The pairing code is the one thing on this row an operator has to read off
+                             the screen and type on the handheld, so it gets its own emphasis instead of
+                             being folded into the status sentence - the same reason the hub's address
+                             has a line of its own below. -->
+                        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,6,0,0">
+                            <Button Style="{StaticResource Material.TextButton}" Content="Sync with handheld"
+                                    Command="{Binding StartSyncingCommand}"
+                                    ToolTip="Open the hub and accept a paired handheld for live sync" />
+                            <Button Style="{StaticResource Material.TextButton}" Content="Stop sync" Margin="8,0,0,0"
+                                    Command="{Binding StopSyncingCommand}" ToolTip="Close live sync and the hub" />
+                            <Button Style="{StaticResource Material.TextButton}" Content="Unpair" Margin="8,0,0,0"
+                                    Command="{Binding UnpairCommand}" ToolTip="Forget the paired handheld so a different one can pair" />
+                            <TextBlock Text="{Binding SyncStatus}" VerticalAlignment="Center" Margin="12,0,0,0"
+                                       Style="{StaticResource Type.BodySmall}"
+                                       Foreground="{StaticResource Brush.OnSecondaryContainer}" />
+                            <Border Background="{StaticResource Brush.SurfaceContainerHigh}" CornerRadius="3"
+                                    Padding="6,2" Margin="8,0,0,0" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource Type.BodySmall}"
+                                           Foreground="{StaticResource Brush.OnSurfaceVariant}"
+                                           Text="{Binding PairingCode, StringFormat='Pairing code {0}'}"
+                                           ToolTip="Type these six digits into the handheld's Sync screen" />
+                            </Border>
+                        </StackPanel>
+
                         <!-- Transfer.
                              The sharing toggle and the address get a row of their own rather than a
                              sixth button in the file row: the address is what the operator has to read
@@ -323,12 +348,25 @@
 
             <!-- Merge review -->
                         <DockPanel Grid.Column="4" Margin="8,16,16,16">
-                            <TextBlock DockPanel.Dock="Top" Style="{StaticResource PaneTitle}" Text="Sync review" />
+                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+                                <TextBlock Style="{StaticResource PaneTitle}" Text="Sync review" />
+                                <!-- The badge is the part that has to survive this pane's eventual
+                                     removal: a conflict has to be noticeable without the pane being
+                                     open. The pane itself is transitional. -->
+                                <Border Background="{StaticResource Brush.SurfaceContainerHigh}" CornerRadius="8"
+                                        Padding="7,1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                        ToolTip="Fields both devices changed to different values"
+                                        Visibility="{Binding OpenConflictCount, Converter={StaticResource CountToVisible}}">
+                                    <TextBlock Style="{StaticResource Type.LabelMedium}"
+                                               Foreground="{StaticResource Brush.OnSurfaceVariant}"
+                                               Text="{Binding ConflictBadge}" />
+                                </Border>
+                            </StackPanel>
 
                             <!-- Accept is the committing action for this pane, so it gets the filled
                                  treatment; everything else here stays tonal or text. -->
                             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
-                                <Button Content="Accept" Style="{StaticResource Material.FilledButton}" Command="{Binding AcceptMergeCommand}"
+                                <Button Content="Accept" Style="{StaticResource Material.FilledButton}" Command="{Binding CommitMergeCommand}"
                                         ToolTip="Apply every decision and export as the new baseline (Ctrl+Enter)" />
                                 <Button Content="Discard" Style="{StaticResource Material.TextButton}" Margin="8,0,0,0" Command="{Binding DiscardMergeCommand}" />
                             </StackPanel>

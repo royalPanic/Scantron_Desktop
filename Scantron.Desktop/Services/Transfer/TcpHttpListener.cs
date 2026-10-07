@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using Scantron.Desktop.Services.Sync;
 
 namespace Scantron.Desktop.Services.Transfer;
 
@@ -53,6 +54,7 @@ internal sealed class TcpHttpListener : IDisposable
         [405] = "Method Not Allowed",
         [413] = "Content Too Large",
         [417] = "Expectation Failed",
+        [426] = "Upgrade Required",
         [431] = "Request Header Fields Too Large",
         [500] = "Internal Server Error",
         [503] = "Service Unavailable",
@@ -120,6 +122,31 @@ internal sealed class TcpHttpListener : IDisposable
         Func<TcpHttpRequest, CancellationToken, Task<HubResponse>> handler,
         CancellationToken token)
     {
+        await RunAsync(handler, upgrade: null, token).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Accepts and serves connections one at a time until stopped.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Sequential on purpose - see the class remarks. A client that vanishes mid-request is an
+    /// ordinary event in a warehouse, so every per-connection failure is logged and the loop
+    /// continues: one scanner walking out of range must not take sharing down with it.
+    /// </para>
+    /// <para>
+    /// <paramref name="upgrade"/> takes over a connection that asks to switch protocols. It is
+    /// handed the raw stream because a WebSocket owns the socket from the handshake onwards, and
+    /// anything the HTTP layer did to it first would be protocol corruption. Because the handshake
+    /// connection then outlives the loop iteration, it is served on its own task - otherwise one
+    /// paired handheld would block every other request until it disconnected.
+    /// </para>
+    /// </remarks>
+    public async Task RunAsync(
+        Func<TcpHttpRequest, CancellationToken, Task<HubResponse>> handler,
+        Func<TcpHttpRequest, NetworkStream, IPEndPoint?, CancellationToken, Task>? upgrade,
+        CancellationToken token)
+    {
         ArgumentNullException.ThrowIfNull(handler);
 
         var listener = _listener ?? throw new InvalidOperationException("The listener has not been started.");
@@ -142,23 +169,28 @@ internal sealed class TcpHttpListener : IDisposable
                 break;
             }
 
-            using (client)
-            {
-                try
-                {
-                    await ServeAsync(client, handler, token).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is IOException or SocketException or OperationCanceledException)
-                {
-                    Log.Warning($"A hub connection failed: {ex.Message}");
-                }
-            }
+        try
+        {
+            await ServeAsync(client, handler, upgrade, token).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or OperationCanceledException)
+        {
+            Log.Warning($"A hub connection failed: {ex.Message}");
+        }
+        finally
+        {
+            // Disposal is unconditional and happens here, after the upgrade handler has returned.
+            // The handler owns the stream for as long as the session runs, so whoever disposes the
+            // client must be the one that knows the session has finished.
+            client.Dispose();
+        }
         }
     }
 
     private async Task ServeAsync(
         TcpClient client,
         Func<TcpHttpRequest, CancellationToken, Task<HubResponse>> handler,
+        Func<TcpHttpRequest, NetworkStream, IPEndPoint?, CancellationToken, Task>? upgrade,
         CancellationToken token)
     {
         // Scanner hardware is latency-sensitive and the request is a single small round trip,
@@ -167,6 +199,36 @@ internal sealed class TcpHttpListener : IDisposable
 
         var stream = client.GetStream();
         var request = await ReadRequestAsync(stream, token).ConfigureAwait(false);
+
+        // A protocol upgrade is checked before anything else, because it is the one request whose
+        // connection outlives this method. The raw stream is handed over - not a wrapped one - since
+        // the WebSocket owns every byte from here on, and the handshake reply is the only HTTP this
+        // connection will ever speak.
+        if (upgrade is not null && request.IsUpgrade)
+        {
+            var accept = WebSocketCodec.AcceptHandshake(request.Headers);
+            if (accept is null)
+            {
+                await WriteAsync(
+                    stream,
+                    new HubResponse(400, HubResponse.Text, "That is not a usable WebSocket upgrade request."),
+                    token).ConfigureAwait(false);
+                return;
+            }
+
+            await WriteRawAsync(stream, accept, token).ConfigureAwait(false);
+
+            // Ownership passes to the upgrade handler for the life of the session. The outer
+            // finally still disposes the client once the handler returns, which is the only moment
+            // it is safe to do so.
+            await upgrade(
+                new TcpHttpRequest(request.Method, request.Path, "", client.Client.RemoteEndPoint as IPEndPoint),
+                stream,
+                client.Client.RemoteEndPoint as IPEndPoint,
+                token).ConfigureAwait(false);
+
+            return;
+        }
 
         if (request.Headers.TryGetValue("expect", out var expectation) &&
             expectation.Contains("100-continue", StringComparison.OrdinalIgnoreCase))
@@ -467,5 +529,18 @@ internal sealed class TcpHttpListener : IDisposable
         string Path,
         string Body,
         Dictionary<string, string> Headers,
-        bool OverBodyLimit);
+        bool OverBodyLimit)
+    {
+        /// <summary>
+        /// True when the client is asking to switch protocols.
+        /// </summary>
+        /// <remarks>
+        /// Detected from the headers rather than from the path, because an upgrade is a property of
+        /// the request and not of the route: a client that asks to upgrade an unknown path should
+        /// still be refused as an upgrade, not answered with a body it will never read.
+        /// </remarks>
+        public bool IsUpgrade =>
+            Headers.TryGetValue("upgrade", out var upgrade) &&
+            upgrade.Contains("websocket", StringComparison.OrdinalIgnoreCase);
+    }
 }

@@ -300,10 +300,20 @@ public sealed class TransferHubTests
     [Fact]
     public void An_unknown_path_is_a_404()
     {
-        var response = Call("GET", "/sync");
+        var response = Call("GET", "/teleport");
 
         Assert.Equal(404, response.StatusCode);
-        Assert.Contains("/sync", response.Body, StringComparison.Ordinal);
+        Assert.Contains("/teleport", response.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void The_live_sync_route_asked_for_without_an_upgrade_explains_itself()
+    {
+        // The route exists, so 404 would be a lie; 426 names the one thing the client got wrong.
+        var response = Call("GET", "/sync");
+
+        Assert.Equal(426, response.StatusCode);
+        Assert.Contains("websocket", response.Body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Theory]

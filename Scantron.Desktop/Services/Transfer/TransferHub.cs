@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using Scantron.Core.Models;
+using Scantron.Desktop.Services.Sync;
 
 namespace Scantron.Desktop.Services.Transfer;
 
@@ -107,7 +108,10 @@ public sealed class TransferHub : IAsyncDisposable
     /// Routes an inbound document into the merge path. Called on the UI thread, because it
     /// touches the view model and that is not thread-safe.
     /// </param>
-    public void Start(Func<InventoryDocument?> currentDocument, Func<InventoryDocument, HubResponse> onPush)
+    public void Start(
+        Func<InventoryDocument?> currentDocument,
+        Func<InventoryDocument, HubResponse> onPush,
+        SyncCoordinator? sync = null)
     {
         ArgumentNullException.ThrowIfNull(currentDocument);
         ArgumentNullException.ThrowIfNull(onPush);
@@ -142,7 +146,7 @@ public sealed class TransferHub : IAsyncDisposable
 
             var token = _cancellation.Token;
             _serve = Task.Run(
-                () => RunAsync(listener, currentDocument, onPush, token),
+                () => RunAsync(listener, currentDocument, onPush, sync, token),
                 CancellationToken.None);
 
             SetState(HubState.Sharing(Advertised()));
@@ -335,11 +339,34 @@ public sealed class TransferHub : IAsyncDisposable
         TcpHttpListener listener,
         Func<InventoryDocument?> currentDocument,
         Func<InventoryDocument, HubResponse> onPush,
+        SyncCoordinator? sync,
         CancellationToken token)
     {
         await listener.RunAsync(
             (request, cancellation) => DispatchAsync(request, currentDocument, onPush, cancellation),
+            sync is null
+                ? null
+                : (request, stream, remote, cancellation) => DispatchUpgradeAsync(request, stream, remote, cancellation, sync),
             token).ConfigureAwait(false);
+    }
+
+    private static Task DispatchUpgradeAsync(
+        TcpHttpRequest request,
+        System.Net.Sockets.NetworkStream stream,
+        System.Net.IPEndPoint? remote,
+        CancellationToken token,
+        SyncCoordinator sync)
+    {
+        // Only the live-sync route upgrades. Anything else that asked to switch protocols is a
+        // client confusion worth naming, and leaving the socket untouched is the safest answer -
+        // the HTTP layer has already written a refusal for it.
+        if (!string.Equals(request.Path.Split('?', '#')[0].TrimEnd('/'), "/sync", StringComparison.OrdinalIgnoreCase))
+        {
+            Log.Warning($"Refused a WebSocket upgrade for {request.Path}");
+            return Task.CompletedTask;
+        }
+
+        return sync.ServeAsync(stream, remote, token);
     }
 
     private Task<HubResponse> DispatchAsync(
